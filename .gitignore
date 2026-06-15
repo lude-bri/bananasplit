@@ -1,0 +1,20 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+bananasplit
+
+# Test/coverage
+*.test
+*.out
+coverage.*
+
+# Editor/OS
+.DS_Store
+.vscode/
+.idea/
+
+# Local data
+data/
+*.db
