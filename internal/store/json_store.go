@@ -16,7 +16,7 @@ import (
 	"slices"
 	"sync"
 
-	"BananaSplit/internal/app"
+	"bananasplit/internal/app"
 )
 
 /* *****************************************************************************
@@ -103,7 +103,7 @@ func (s *JSONStore) Add(expense app.Expense) (app.Expense, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	expense, err := s.load()
+	expenses, err := s.load()
 	if err != nil {
 		return app.Expense{}, err
 	}

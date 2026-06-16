@@ -1,8 +1,12 @@
 package app
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -78,7 +82,28 @@ func (s *Server) handleCreateExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectWithError(w, r, "Descricao obrigatoria")
+	amountCents, err := parseMoney(r.FormValue("amount"))
+	if err != nil || amountCents <= 0 {
+		redirectWithError(w, r, "Valor invalido")
+		return
+	}
+
+	date, err := time.Parse("2006-01-02", r.FormValue("date"))
+	if err != nil {
+		redirectWithError(w, r, "Data invalida")
+		return
+	}
+
+	expense := Expense{
+		Description: strings.TrimSpace(r.FormValue("description")),
+		Category:    strings.TrimSpace(r.FormValue("category")),
+		PaidBy:      r.FormValue("paid_by"),
+		AmountCents: amountCents,
+		Date:        date,
+	}
+
+	if expense.Description == "" {
+		redirectWithError(w, r, "Descricao obrigatoria")
 		return
 	}
 
