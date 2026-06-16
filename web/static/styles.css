@@ -1,0 +1,175 @@
+:root {
+    color-scheme: light;
+    font-family: 'Courier New', Courier, monospace;
+    background: #f6f7f4;
+    color: #17211b;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0
+}
+
+button,
+input,
+select {
+    font: inherit;
+}
+
+h2 {
+	font-size: 1.1rem;
+	margin-bottom: 18px;
+}
+
+.month-picker {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+label {
+	display: grid;
+	gap: 7px;
+	font-weight: 650;
+	color: #2f3d33;
+}
+
+input,
+select {
+	min-height: 42px;
+	border: 1px solid #cfd8d2;
+	border-radius: 6px;
+	padding: 9px 11px;
+	background: #fff;
+	color: #17211b;
+}
+
+button {
+	min-height: 42px;
+	border: 0;
+	border-radius: 6px;
+	padding: 9px 14px;
+	background: #1f6f54;
+	color: white;
+	font-weight: 750;
+	cursor: pointer;
+}
+
+button:hover {
+	background: #185640;
+}
+
+.ghost {
+	min-height: 34px;
+	background: transparent;
+	color: #9a2f2f;
+	border: 1px solid #e1c3c3;
+}
+
+.ghost:hover {
+	background: #fff1f1;
+}
+
+.summary-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 14px;
+	margin-bottom: 18px;
+}
+
+.metric,
+.panel {
+	border: 1px solid #dfe6e0;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: 0 1px 2px rgb(23 33 27 / 6%);
+}
+
+.metric {
+	display: grid;
+	gap: 8px;
+	padding: 16px;
+}
+
+.metric span {
+	color: #627067;
+	font-size: 0.92rem;
+}
+
+.metric strong {
+	font-size: 1.45rem;
+}
+
+.metric.highlight {
+	background: #eaf4ee;
+	border-color: #bfdac9;
+}
+
+.split {
+	display: grid;
+	grid-template-columns: 340px minmax(0, 1fr);
+	gap: 18px;
+	align-items: start;
+}
+
+.panel {
+	padding: 18px;
+}
+
+.form {
+	display: grid;
+	gap: 14px;
+}
+
+.error {
+	border: 1px solid #e3b8b8;
+	border-radius: 6px;
+	padding: 12px 14px;
+	background: #fff1f1;
+	color: #8c2424;
+}
+
+.table-wrap {
+	overflow-x: auto;
+}
+
+table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+th,
+td {
+	padding: 12px 10px;
+	border-bottom: 1px solid #edf0ed;
+	text-align: left;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+th {
+	color: #657169;
+	font-size: 0.84rem;
+	font-weight: 750;
+}
+
+.empty {
+	margin: 0;
+	color: #657169;
+}
+
+@media (max-width: 880px) {
+	.topbar,
+	.month-picker {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.summary-grid,
+	.split {
+		grid-template-columns: 1fr;
+	}
+}

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Split Home</title>
+	<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+	<main class="shell">
+		<header class="topbar">
+			<div>
+				<p class="eyebrow">Conta compartilhada</p>
+				<h1>Split Home</h1>
+			</div>
+			<form class="month-picker" method="get" action="/">
+				<label for="month">Mes</label>
+				<input id="month" type="month" name="month" value="{{.Month}}">
+				<button type="submit">Ver</button>
+			</form>
+		</header>
+
+		{{if .Error}}
+			<p class="error">{{.Error}}</p>
+		{{end}}
+
+		<section class="summary-grid" aria-label="Resumo mensal">
+			<div class="metric">
+				<span>Total do mes</span>
+				<strong>{{money .Summary.TotalCents}}</strong>
+			</div>
+			<div class="metric">
+				<span>Luigi pagou</span>
+				<strong>{{money .Summary.LuigiPaidCents}}</strong>
+			</div>
+			<div class="metric">
+				<span>Parceira pagou</span>
+				<strong>{{money .Summary.PartnerPaidCents}}</strong>
+			</div>
+			<div class="metric highlight">
+				<span>{{.Summary.SettlementSentence}}</span>
+				<strong>{{money .Summary.SettlementCents}}</strong>
+			</div>
+		</section>
+
+		<section class="split">
+			<form class="panel form" method="post" action="/expenses">
+				<h2>Nova despesa</h2>
+				<input type="hidden" name="month" value="{{.Month}}">
+
+				<label for="description">Descricao</label>
+				<input id="description" name="description" placeholder="Supermercado" required>
+
+				<label for="amount">Valor</label>
+				<input id="amount" name="amount" inputmode="decimal" placeholder="42,50" required>
+
+				<label for="category">Categoria</label>
+				<input id="category" name="category" placeholder="Comida">
+
+				<label for="paid_by">Quem pagou</label>
+				<select id="paid_by" name="paid_by" required>
+						<option value="Luigi">Luigi</option>
+						<option value="Parceira">Parceira</option>
+				</select>
+
+				<label for="date">Data</label>
+				<input id="date" type="date" name="date" required>
+
+				<button type="submit">Adicionar</button>
+			</form>
+
+			<section class="panel">
+				<h2>Despesas</h2>
+				{{if .Expenses}}
+					<div class="table-wrap">
+						<table>
+							<thead>
+								<tr>
+									<th>Data</th>
+									<th>Descricao</th>
+									<th>Categoria</th>
+									<th>Pago por</th>
+									<th>Valor</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								{{range .Expenses}}
+									<tr>
+										<td>{{date .Date}}</td>
+										<td>{{.Description}}</td>
+										<td>{{.Category}}</td>
+										<td>{{.PaidBy}}</td>
+										<td>{{money .AmountCents}}</td>
+										<td>
+											<form method="post" action="/expenses/delete">
+												<input type="hidden" name="id" value="{{.ID}}">
+												<input type="hidden" name="month" value="{{$.Month}}">
+												<button class="ghost" type="submit">Remover</button>
+											</form>
+										</td>
+									</tr>
+								{{end}}
+							</tbody>
+						</table>
+					</div>
+				{{else}}
+					<p class="empty">Ainda nao ha despesas neste mes.</p>
+				{{end}}
+			</section>
+		</section>
+	</main>
+</body>
+</html>

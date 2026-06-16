@@ -9,10 +9,14 @@ Author: Luigi Piantavinha
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
+
+	"BananaSplit/internal/app"
 )
 
 /* *****************************************************************************
@@ -104,4 +108,63 @@ func (s *JSONStore) Add(expense app.Expense) (app.Expense, error) {
 		return app.Expense{}, err
 	}
 
+	expense.ID = nextID(expenses)
+	expenses = append(expenses, expense)
+
+	if err := s.save(expenses); err != nil {
+		return app.Expense{}, err
+	}
+
+	return expense, nil
+}
+
+func (s *JSONStore) Delete(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	expenses, err := s.load()
+	if err != nil {
+		return err
+	}
+
+	expenses = slices.DeleteFunc(expenses, func(expense app.Expense) bool {
+		return expense.ID == id
+	})
+
+	return s.save(expenses)
+}
+
+func (s *JSONStore) load() ([]app.Expense, error) {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return nil, err
+	}
+
+	var expenses []app.Expense
+	if err := json.Unmarshal(data, &expenses); err != nil {
+		return nil, err
+	}
+
+	return expenses, nil
+}
+
+func (s *JSONStore) save(expenses []app.Expense) error {
+	data, err := json.MarshalIndent(expenses, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	data = append(data, '\n')
+	return os.WriteFile(s.path, data, 0o644)
+}
+
+func nextID(expenses []app.Expense) int64 {
+	var maxID int64
+	for _, expense := range expenses {
+		if expense.ID > maxID {
+			maxID = expense.ID
+		}
+	}
+
+	return maxID + 1
 }
