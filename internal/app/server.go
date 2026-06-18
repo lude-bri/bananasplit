@@ -40,7 +40,7 @@ func NewServer(store ExpenseStore) (*Server, error) {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /static", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("POST /expenses", s.handleCreateExpense)
 	mux.HandleFunc("POST /expenses/delete", s.handleDeleteExpense)
