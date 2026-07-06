@@ -4,6 +4,19 @@ Author: Luigi Piantavinha
 
 2026jun15 - Initial Version
 
+This file provides the storage layer of BananaSplit: a concrete implementation
+of the app.ExpenseStore interface that persists expenses to a JSON file on disk.
+
+Content:
+  - JSONStore:    holds the file path and a mutex for safe concurrent access.
+  - Constructor:  NewJSONStore (creates the folder/file if missing).
+  - Public API:   All, Add, Delete (the ExpenseStore contract).
+  - Private I/O:  load, save (read/write the JSON file).
+  - Helper:       nextID (assigns sequential IDs).
+
+Every public operation is guarded by a mutex so simultaneous requests cannot
+corrupt the file during the read-modify-write cycle.
+
 */
 
 package store
@@ -118,6 +131,19 @@ func (s *JSONStore) Add(expense app.Expense) (app.Expense, error) {
 	return expense, nil
 }
 
+/* Delete - removes an expense from the store
+*
+* This function loads all expenses, drops the one whose ID matches, and saves
+* the remaining expenses back to the JSON file. It is safe for concurrent use.
+*
+* Parameters:
+*   - id: The ID of the expense to remove.
+*
+* Returns:
+*   - An error if loading or saving fails; nil on success. Deleting a
+*     non-existent ID is treated as success (no-op).
+ */
+
 func (s *JSONStore) Delete(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,6 +160,18 @@ func (s *JSONStore) Delete(id int64) error {
 	return s.save(expenses)
 }
 
+/* load - reads and decodes all expenses from the JSON file
+*
+* This is an internal helper (callers must already hold the mutex). It reads the
+* file's bytes and unmarshals them into a slice of expenses.
+*
+* Parameters:
+*   - None.
+*
+* Returns:
+*   - The decoded slice of app.Expense, or an error if reading or parsing fails.
+ */
+
 func (s *JSONStore) load() ([]app.Expense, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -148,6 +186,19 @@ func (s *JSONStore) load() ([]app.Expense, error) {
 	return expenses, nil
 }
 
+/* save - encodes and writes all expenses to the JSON file
+*
+* This is an internal helper (callers must already hold the mutex). It marshals
+* the slice into indented JSON, appends a trailing newline, and overwrites the
+* file.
+*
+* Parameters:
+*   - expenses: The full slice of expenses to persist.
+*
+* Returns:
+*   - An error if encoding or writing fails; nil on success.
+ */
+
 func (s *JSONStore) save(expenses []app.Expense) error {
 	data, err := json.MarshalIndent(expenses, "", "  ")
 	if err != nil {
@@ -157,6 +208,18 @@ func (s *JSONStore) save(expenses []app.Expense) error {
 	data = append(data, '\n')
 	return os.WriteFile(s.path, data, 0o644)
 }
+
+/* nextID - computes the next sequential ID for a new expense
+*
+* This is an internal helper that scans the existing expenses for the highest ID
+* and returns that value plus one.
+*
+* Parameters:
+*   - expenses: The current slice of stored expenses.
+*
+* Returns:
+*   - The next ID to assign (1 when the slice is empty).
+ */
 
 func nextID(expenses []app.Expense) int64 {
 	var maxID int64
