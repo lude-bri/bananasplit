@@ -31,13 +31,12 @@ file, so there is no database to install.
 - Browse expenses **one month at a time** using a month picker.
 - See a live **monthly summary**:
   - Total spent that month.
-  - How much **Luigi** paid.
-  - How much **Parceira** (the partner) paid.
+  - How much **User A** paid.
+  - How much **User B** paid.
   - A **settlement** line: who should pay whom, and how much, to be even.
 - Delete an expense you added by mistake.
 
-The UI is in Portuguese (the app was built for a specific couple), but the code
-and logic are language-agnostic.
+The UI and code are in English.
 
 ---
 
@@ -63,29 +62,29 @@ Suppose in one month:
 
 | Expense       | Paid by  | Amount  |
 | ------------- | -------- | ------- |
-| Supermarket   | Luigi    | 60,00 € |
-| Restaurant    | Parceira | 40,00 € |
+| Supermarket   | User A   | 60,00 € |
+| Restaurant    | User B   | 40,00 € |
 
 - **Total** = 100,00 €
 - **Each fair share** = 50,00 €
-- **Luigi's balance** = 60 − 50 = **+10,00 €** (he overpaid)
-- **Parceira's balance** = 40 − 50 = **−10,00 €** (she underpaid)
+- **User A's balance** = 60 − 50 = **+10,00 €** (overpaid)
+- **User B's balance** = 40 − 50 = **−10,00 €** (underpaid)
 
-So the settlement is: **"Parceira should pay Luigi 10,00 €"**, and both end up
+So the settlement is: **"User B should pay User A 10,00 €"**, and both end up
 having contributed 50,00 € each.
 
 This exact calculation lives in the `summarize` function in
 [internal/app/server.go](internal/app/server.go):
 
 ```go
-summary.LuigiShareCents   = summary.TotalCents / 2
-summary.PartnerShareCents = summary.TotalCents - summary.LuigiShareCents
+summary.UserAShareCents = summary.TotalCents / 2
+summary.UserBShareCents = summary.TotalCents - summary.UserAShareCents
 
-luigiBalance := summary.LuigiPaidCents - summary.LuigiShareCents
-summary.SettlementCents = abs(luigiBalance)
+userABalance := summary.UserAPaidCents - summary.UserAShareCents
+summary.SettlementCents = abs(userABalance)
 ```
 
-Notice that the partner's share is computed as `Total − Luigi's share` rather
+Notice that User B's share is computed as `Total − User A's share` rather
 than a second division. **Why?** Integer division can drop a cent (e.g. an odd
 total like 100,01 €). By giving one half the floored value and the other half
 *the remainder*, the two shares **always add back up to the exact total** — no
@@ -206,8 +205,8 @@ Handled by `handleCreateExpense`, which is careful about validation:
    empty, non-numeric, negative, or over-precise values.
 3. Parse the date (`2006-01-02` format).
 4. Trim the description; reject it if empty.
-5. Default the category to `"Geral"` if left blank.
-6. Ensure `paid_by` is exactly `"Luigi"` or `"Parceira"`.
+5. Default the category to `"General"` if left blank.
+6. Ensure `paid_by` is exactly `"User A"` or `"User B"`.
 7. Save via `store.Add(...)`.
 8. **Redirect** to `/?month=...` for the expense's month.
 
@@ -362,9 +361,9 @@ git-ignored). Each record looks like this:
 [
   {
     "id": 1,
-    "description": "Supermercado",
-    "category": "Comida",
-    "paid_by": "Luigi",
+    "description": "Supermarket",
+    "category": "Food",
+    "paid_by": "User A",
     "amount_cents": 6000,
     "date": "2026-07-04T00:00:00Z"
   }
@@ -379,7 +378,7 @@ editor — handy for debugging or backups.
 ## Possible next steps
 
 - Add the `cmd/bananasplit/main.go` entry point described above.
-- Make the two names (`Luigi` / `Parceira`) configurable instead of hard-coded.
+- Make the two names (`User A` / `User B`) configurable instead of hard-coded.
 - Support arbitrary split ratios (e.g. 60/40) instead of a fixed 50/50.
 - Add per-category breakdowns to the monthly summary.
 - Swap `JSONStore` for a SQLite store — thanks to the `ExpenseStore` interface,

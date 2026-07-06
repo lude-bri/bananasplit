@@ -29,9 +29,9 @@ import "time"
 *
 * Fields:
 *   - ID:          unique identifier assigned by the store.
-*   - Description: free-text label (e.g. "Supermercado").
-*   - Category:    grouping label (e.g. "Comida"); defaults to "Geral".
-*   - PaidBy:      who actually paid ("Luigi" or "Parceira").
+*   - Description: free-text label (e.g. "Supermarket").
+*   - Category:    grouping label (e.g. "Food"); defaults to "General".
+*   - PaidBy:      who actually paid ("User A" or "User B").
 *   - AmountCents: the value in integer cents to avoid floating-point errors.
 *   - Date:        when the expense happened.
  */
@@ -73,10 +73,10 @@ type ExpenseStore interface {
 * Fields:
 *   - Month:              the month being summarised, as "2006-01".
 *   - TotalCents:         sum of every expense in the month.
-*   - LuigiPaidCents:     total actually paid by Luigi.
-*   - PartnerPaidCents:   total actually paid by the partner.
-*   - PartnerShareCents:  the partner's fair share (half of the total).
-*   - LuigiShareCents:    Luigi's fair share (half of the total).
+*   - UserAPaidCents:     total actually paid by User A.
+*   - UserBPaidCents:     total actually paid by User B.
+*   - UserBShareCents:    User B's fair share (half of the total).
+*   - UserAShareCents:    User A's fair share (half of the total).
 *   - SettlementCents:    how much must change hands to make things even.
 *   - SettlementSentence: human-readable explanation of who owes whom.
  */
@@ -84,10 +84,10 @@ type ExpenseStore interface {
 type MonthlySummary struct {
 	Month              string
 	TotalCents         int64
-	LuigiPaidCents     int64
-	PartnerPaidCents   int64
-	PartnerShareCents  int64
-	LuigiShareCents    int64
+	UserAPaidCents     int64
+	UserBPaidCents     int64
+	UserBShareCents    int64
+	UserAShareCents    int64
 	SettlementCents    int64
 	SettlementSentence string
 }

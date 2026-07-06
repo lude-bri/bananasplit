@@ -163,7 +163,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 /* handleCreateExpense - validates and stores a new expense (POST /expenses).
 *
 * It parses the submitted form, validates every field (amount, date, who paid,
-* description), applies defaults (empty category becomes "Geral"), and saves the
+* description), applies defaults (empty category becomes "General"), and saves the
 * expense. On any validation problem it redirects back with an error message.
 * On success it uses the Post/Redirect/Get pattern so a page refresh cannot
 * re-submit the form.
@@ -184,13 +184,13 @@ func (s *Server) handleCreateExpense(w http.ResponseWriter, r *http.Request) {
 
 	amountCents, err := parseMoney(r.FormValue("amount"))
 	if err != nil || amountCents <= 0 {
-		redirectWithError(w, r, "Valor invalido")
+		redirectWithError(w, r, "Invalid amount")
 		return
 	}
 
 	date, err := time.Parse("2006-01-02", r.FormValue("date"))
 	if err != nil {
-		redirectWithError(w, r, "Data invalida")
+		redirectWithError(w, r, "Invalid date")
 		return
 	}
 
@@ -203,16 +203,16 @@ func (s *Server) handleCreateExpense(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if expense.Description == "" {
-		redirectWithError(w, r, "Descricao obrigatoria")
+		redirectWithError(w, r, "Description is required")
 		return
 	}
 
 	if expense.Category == "" {
-		expense.Category = "Geral"
+		expense.Category = "General"
 	}
 
-	if expense.PaidBy != "Luigi" && expense.PaidBy != "Parceira" {
-		redirectWithError(w, r, "Pessoa invalida")
+	if expense.PaidBy != "User A" && expense.PaidBy != "User B" {
+		redirectWithError(w, r, "Invalid person")
 		return
 	}
 
@@ -239,13 +239,13 @@ func (s *Server) handleCreateExpense(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteExpense(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		redirectWithError(w, r, "Nao consegui ler o formulario")
+		redirectWithError(w, r, "Cannot read form")
 		return
 	}
 
 	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 	if err != nil {
-		redirectWithError(w, r, "Despesa invalida")
+		redirectWithError(w, r, "Invalid expense")
 		return
 	}
 
@@ -289,9 +289,9 @@ func filterByMonth(expenses []Expense, month string) []Expense {
 /* summarize - computes the monthly totals and the 50/50 settlement.
 *
 * It sums every expense, splitting how much each person paid. Each person's fair
-* share is half the total; the partner's share is computed as (total - Luigi's
+* share is half the total; User B's share is computed as (total - User A's
 * share) so the two halves always add back to the exact total (no lost cent).
-* The settlement is the size of Luigi's imbalance, and a sentence explains who
+* The settlement is the size of User A's imbalance, and a sentence explains who
 * owes whom.
 *
 * Parameters:
@@ -308,26 +308,26 @@ func summarize(expenses []Expense, month string) MonthlySummary {
 	for _, expense := range expenses {
 		summary.TotalCents += expense.AmountCents
 		switch expense.PaidBy {
-		case "Luigi":
-			summary.LuigiPaidCents += expense.AmountCents
-		case "Parceira":
-			summary.PartnerPaidCents += expense.AmountCents
+		case "User A":
+			summary.UserAPaidCents += expense.AmountCents
+		case "User B":
+			summary.UserBPaidCents += expense.AmountCents
 		}
 	}
 
-	summary.LuigiShareCents = summary.TotalCents / 2
-	summary.PartnerShareCents = summary.TotalCents - summary.LuigiShareCents
+	summary.UserAShareCents = summary.TotalCents / 2
+	summary.UserBShareCents = summary.TotalCents - summary.UserAShareCents
 
-	luigiBalance := summary.LuigiPaidCents - summary.LuigiShareCents
-	summary.SettlementCents = abs(luigiBalance)
+	userABalance := summary.UserAPaidCents - summary.UserAShareCents
+	summary.SettlementCents = abs(userABalance)
 
 	switch {
-	case luigiBalance > 0:
-		summary.SettlementSentence = "Parceira deve pagar a Luigi"
-	case luigiBalance < 0:
-		summary.SettlementSentence = "Luigi deve pagar a Parceira"
+	case userABalance > 0:
+		summary.SettlementSentence = "User B should pay User A"
+	case userABalance < 0:
+		summary.SettlementSentence = "User A should pay User B"
 	default:
-		summary.SettlementSentence = "Esta tudo certo entre voces"
+		summary.SettlementSentence = "Everything is settled between you"
 	}
 
 	return summary
