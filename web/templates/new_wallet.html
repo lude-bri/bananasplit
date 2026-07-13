@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Create a wallet · BananaSplit</title>
+	<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+	<main class="shell narrow-shell">
+		<header class="app-header">
+			<a class="brand" href="/"><span class="logo">BS</span><span>BananaSplit</span></a>
+			<a class="back-link" href="/">← Home</a>
+		</header>
+		<section class="panel setup-panel">
+			<p class="eyebrow">Create a wallet</p>
+			<h1>Who will share this budget?</h1>
+			<form class="stack-form" method="post" action="/wallets">
+				<label for="wallet-name">Wallet name</label>
+				<input id="wallet-name" name="name" placeholder="Our home" required autofocus>
+				<div>
+					<label>Participants</label>
+					<p class="field-help">Add everyone who will contribute to this wallet.</p>
+					<div id="participants" class="participant-inputs">
+						<input name="people" placeholder="Name" required>
+						<input name="people" placeholder="Name">
+					</div>
+					<button class="text-button" id="add-participant" type="button">+ Add another person</button>
+				</div>
+				<button type="submit">Create wallet</button>
+			</form>
+		</section>
+	</main>
+	<script>
+		document.getElementById('add-participant').addEventListener('click', function () {
+			const input = document.createElement('input');
+			input.name = 'people';
+			input.placeholder = 'Name';
+			document.getElementById('participants').appendChild(input);
+			input.focus();
+		});
+	</script>
+</body>
+</html>

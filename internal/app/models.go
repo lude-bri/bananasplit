@@ -1,93 +1,63 @@
-/* MODELS
-
-Author: Luigi Piantavinha
-
-This file defines the core domain types that the whole application is built
-around, plus the contract (interface) that any storage backend must satisfy.
-
-Content:
-  - Expense:        a single shared expense (who paid, how much, when).
-  - ExpenseStore:   the storage contract used by the web layer. It hides the
-                    concrete persistence mechanism (JSON file, database, ...)
-                    behind three simple operations.
-  - MonthlySummary: the pre-computed numbers shown on the monthly dashboard
-                    (totals, per-person shares and the settlement).
-
-These types are intentionally free of any HTTP or storage logic so they can be
-shared by every layer of the app.
-
-*/
-
 package app
 
 import "time"
 
-/* Expense - represents a single shared expense.
-*
-* Each field is tagged with `json:"..."` so the type can be marshalled to and
-* from the JSON file used for persistence.
-*
-* Fields:
-*   - ID:          unique identifier assigned by the store.
-*   - Description: free-text label (e.g. "Supermarket").
-*   - Category:    grouping label (e.g. "Food"); defaults to "General".
-*   - PaidBy:      who actually paid ("User A" or "User B").
-*   - AmountCents: the value in integer cents to avoid floating-point errors.
-*   - Date:        when the expense happened.
- */
+type Person struct {
+	ID                  int64  `json:"id"`
+	Name                string `json:"name"`
+	SalaryCents         int64  `json:"salary_cents"`
+	ContributionPercent int64  `json:"contribution_percent"`
+}
 
 type Expense struct {
 	ID          int64     `json:"id"`
 	Description string    `json:"description"`
 	Category    string    `json:"category"`
-	PaidBy      string    `json:"paid_by"`
+	PaidByID    int64     `json:"paid_by_id"`
+	AmountCents int64     `json:"amount_cents"`
+	Date        time.Time `json:"date"`
+	IsPaid      bool      `json:"is_paid"`
+}
+
+type Wallet struct {
+	ID            int64          `json:"id"`
+	Name          string         `json:"name"`
+	People        []Person       `json:"people"`
+	Expenses      []Expense      `json:"expenses"`
+	Contributions []Contribution `json:"contributions"`
+}
+
+type Contribution struct {
+	ID          int64     `json:"id"`
+	PersonID    int64     `json:"person_id"`
 	AmountCents int64     `json:"amount_cents"`
 	Date        time.Time `json:"date"`
 }
 
-/* ExpenseStore - the storage contract for expenses.
-*
-* Any type that provides these three methods can be used as the application's
-* data store. The web layer depends only on this interface, never on a concrete
-* implementation, which makes the storage backend swappable and easy to fake in
-* tests (dependency inversion).
-*
-* Methods:
-*   - All():        returns every stored expense, or an error.
-*   - Add(expense): persists a new expense and returns it (with its assigned
-*                   ID), or an error.
-*   - Delete(id):   removes the expense with the given ID, or returns an error.
- */
-
-type ExpenseStore interface {
-	All() ([]Expense, error)
-	Add(expense Expense) (Expense, error)
-	Delete(id int64) error
+type Funding struct {
+	PersonID            int64
+	SalaryCents         int64
+	ContributionPercent int64
 }
 
-/* MonthlySummary - the aggregated figures for a single month.
-*
-* This is a plain data holder produced by summarize() and consumed by the HTML
-* template. All monetary fields are in integer cents.
-*
-* Fields:
-*   - Month:              the month being summarised, as "2006-01".
-*   - TotalCents:         sum of every expense in the month.
-*   - UserAPaidCents:     total actually paid by User A.
-*   - UserBPaidCents:     total actually paid by User B.
-*   - UserBShareCents:    User B's fair share (half of the total).
-*   - UserAShareCents:    User A's fair share (half of the total).
-*   - SettlementCents:    how much must change hands to make things even.
-*   - SettlementSentence: human-readable explanation of who owes whom.
- */
+type WalletStore interface {
+	AllWallets() ([]Wallet, error)
+	GetWallet(id int64) (Wallet, error)
+	AddWallet(name string) (Wallet, error)
+	DeleteWallet(id int64) error
+	AddPerson(walletID int64, name string) error
+	DeletePerson(walletID, personID int64) error
+	FundWallet(walletID int64, funding []Funding) error
+	AddExpense(walletID int64, expense Expense) error
+	DeleteExpense(walletID, expenseID int64) error
+}
 
-type MonthlySummary struct {
-	Month              string
-	TotalCents         int64
-	UserAPaidCents     int64
-	UserBPaidCents     int64
-	UserBShareCents    int64
-	UserAShareCents    int64
-	SettlementCents    int64
-	SettlementSentence string
+type WalletSummary struct {
+	PlannedContributionCents int64
+	TotalExpensesCents       int64
+	PaidExpensesCents        int64
+	OutstandingExpensesCents int64
+	AverageMonthlyCents      int64
+	MonthsTracked            int
+	BalanceCents             int64
 }

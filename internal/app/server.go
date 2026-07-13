@@ -3,20 +3,19 @@
 Author: Luigi Piantavinha
 
 This file is the web/application layer of BananaSplit. It owns everything that
-happens between an incoming HTTP request and an outgoing HTML response:
+happens between an incoming HTTP request and an outgoing HTML response.
 
 Content:
-  - Server:        holds the store and the parsed HTML templates.
-  - IndexPageData: the view-model passed to the index template.
-  - Constructor:   NewServer (parses templates, wires the store).
-  - Routing:       Routes (maps URLs/methods to handlers).
-  - Handlers:      handleIndex, handleCreateExpense, handleDeleteExpense.
-  - Business logic helpers: filterByMonth, summarize (the 50/50 split math).
-  - Formatting/parsing helpers: parseMoney, formatMoney, formatDate.
-  - Utility helpers: redirectWithError, abs.
+  - Server:         holds the store and the parsed HTML templates.
+  - View-models:    IndexPageData, WalletPageData.
+  - Constructor:    NewServer (parses templates, wires the store).
+  - Routing:        Routes (maps URLs/methods to handlers).
+  - Handlers:       index + wallet + people + expenses CRUD.
+  - Business logic: summarize (equal split + settlement plan).
+  - Helpers:        parseMoney, formatMoney, formatDate, redirect helpers.
 
-The layer depends only on the ExpenseStore interface, so it has no knowledge of
-how or where expenses are actually persisted.
+The layer depends only on the WalletStore interface, so it has no knowledge of
+how or where data is actually persisted.
 
 */
 
@@ -26,7 +25,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -34,125 +32,93 @@ import (
 
 /* Server - the application's HTTP server.
 *
-* It bundles the two things every request needs: a data store to read/write
-* expenses, and the pre-parsed HTML templates used to render pages.
-*
 * Fields:
-*   - store:     any implementation of the ExpenseStore interface.
+*   - store:     any implementation of the WalletStore interface.
 *   - templates: all templates parsed once at startup, ready to execute.
  */
 
 type Server struct {
-	store     ExpenseStore
+	store     WalletStore
 	templates *template.Template
 }
 
-/* IndexPageData - the view-model handed to the index.html template.
-*
-* It gathers everything the page needs to render in a single struct.
-*
-* Fields:
-*   - Expenses: the expenses for the selected month.
-*   - Summary:  the computed monthly totals and settlement.
-*   - Month:    the currently selected month ("2006-01").
-*   - Error:    an optional error message to display as a banner.
- */
-
+/* IndexPageData - the view-model handed to index.html. */
 type IndexPageData struct {
-	Expenses []Expense
-	Summary  MonthlySummary
-	Month    string
-	Error    string
+	Error string
+}
+
+/* WalletPageData - the view-model handed to wallet.html. */
+type WalletPageData struct {
+	Wallet           Wallet
+	Summary          WalletSummary
+	ShowFundingSetup bool
+	Error            string
 }
 
 /* NewServer - builds a ready-to-use Server.
 *
 * It parses every HTML template under web/templates once and registers the
-* custom template helpers ("money" and "date") so the views can format values.
-* Parsing at construction time means template errors are caught at startup
-* rather than on the first request.
+* custom template helpers so the views can format values. Parsing at
+* construction time means template errors are caught at startup.
 *
 * Parameters:
-*   - store: the ExpenseStore the server will read from and write to.
+*   - store: the WalletStore the server will read from and write to.
 *
 * Returns:
-*   - A pointer to the configured Server, or an error if template parsing fails.
+*   - A pointer to the configured Server, or an error if parsing fails.
  */
 
-func NewServer(store ExpenseStore) (*Server, error) {
+func NewServer(store WalletStore) (*Server, error) {
 	templates, err := template.New("").Funcs(template.FuncMap{
-		"money": formatMoney,
-		"date":  formatDate,
+		"money":        formatMoney,
+		"moneyInput":   formatMoneyInput,
+		"contribution": func(salary, percent int64) int64 { return salary * percent / 100 },
+		"date":         formatDate,
 	}).ParseGlob("web/templates/*.html")
-
 	if err != nil {
 		return nil, err
 	}
 
-	return &Server{
-		store:     store,
-		templates: templates,
-	}, nil
+	return &Server{store: store, templates: templates}, nil
 }
 
-/* Routes - declares the URL routing table and returns the HTTP handler.
-*
-* It maps each method+path pattern to the handler responsible for it, and also
-* serves static assets (CSS) from web/static. It uses Go's method-based routing
-* patterns, so no external router is required.
-*
-* Parameters:
-*   - None (method receiver s provides the handlers).
-*
-* Returns:
-*   - An http.Handler (the configured ServeMux) ready to be passed to a server.
- */
-
+/* Routes - declares the URL routing table and returns the HTTP handler. */
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+
+	// Wallet list (home)
 	mux.HandleFunc("GET /", s.handleIndex)
-	mux.HandleFunc("POST /expenses", s.handleCreateExpense)
-	mux.HandleFunc("POST /expenses/delete", s.handleDeleteExpense)
+	mux.HandleFunc("GET /wallets/new", s.handleNewWallet)
+	mux.HandleFunc("POST /wallets", s.handleCreateWallet)
+	mux.HandleFunc("POST /wallets/delete", s.handleDeleteWallet)
+
+	// Single wallet
+	mux.HandleFunc("GET /wallets/{id}", s.handleWallet)
+
+	// People
+	mux.HandleFunc("POST /wallets/{id}/people", s.handleAddPerson)
+	mux.HandleFunc("POST /wallets/{id}/people/delete", s.handleDeletePerson)
+	mux.HandleFunc("POST /wallets/{id}/fund", s.handleFundWallet)
+
+	// Expenses
+	mux.HandleFunc("POST /wallets/{id}/expenses", s.handleAddExpense)
+	mux.HandleFunc("POST /wallets/{id}/expenses/delete", s.handleDeleteExpense)
 
 	return mux
 }
 
-/* handleIndex - renders the main dashboard page (GET /).
+/* *****************************************************************************
 *
-* It figures out which month to show, loads all expenses, keeps only those in
-* that month, computes the monthly summary, and renders index.html. Any error
-* message present in the query string is surfaced to the user.
+* Handlers - wallet list (home)
 *
-* Parameters:
-*   - w: the HTTP response writer used to send the HTML back.
-*   - r: the incoming request; its "month" and "error" query params are read.
-*
-* Returns:
-*   - Nothing. On failure it writes an HTTP 500 response directly.
- */
+*******************************************************************************/
 
+/* handleIndex renders the landing page. */
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-
-	/* Get the month from the query parameters */
-	month := r.URL.Query().Get("month")
-	if month == "" {
-		month = time.Now().Format("2006-01")
-	}
-
-	/* Get the expenses for the selected month */
-	expenses, err := s.store.All()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	monthlyExpenses := filterByMonth(expenses, month)
 	data := IndexPageData{
-		Expenses: monthlyExpenses,
-		Summary:  summarize(monthlyExpenses, month),
-		Month:    month,
-		Error:    r.URL.Query().Get("error"),
+		Error: r.URL.Query().Get("error"),
 	}
 
 	if err := s.templates.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -160,185 +126,354 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-/* handleCreateExpense - validates and stores a new expense (POST /expenses).
-*
-* It parses the submitted form, validates every field (amount, date, who paid,
-* description), applies defaults (empty category becomes "General"), and saves the
-* expense. On any validation problem it redirects back with an error message.
-* On success it uses the Post/Redirect/Get pattern so a page refresh cannot
-* re-submit the form.
-*
-* Parameters:
-*   - w: the HTTP response writer (used to redirect or report errors).
-*   - r: the incoming request carrying the submitted form values.
-*
-* Returns:
-*   - Nothing. It always ends by redirecting or writing an error response.
- */
+/* handleNewWallet renders the wallet and participant setup form. */
+func (s *Server) handleNewWallet(w http.ResponseWriter, r *http.Request) {
+	if err := s.templates.ExecuteTemplate(w, "new_wallet.html", nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
 
-func (s *Server) handleCreateExpense(w http.ResponseWriter, r *http.Request) {
+/* handleCreateWallet - creates a new wallet (POST /wallets). */
+func (s *Server) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		redirectWithError(w, r, "Cannot read form")
+		redirectHomeError(w, r, "Cannot read form")
 		return
 	}
 
-	amountCents, err := parseMoney(r.FormValue("amount"))
-	if err != nil || amountCents <= 0 {
-		redirectWithError(w, r, "Invalid amount")
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		redirectHomeError(w, r, "Wallet name is required")
 		return
 	}
 
-	date, err := time.Parse("2006-01-02", r.FormValue("date"))
+	people := r.Form["people"]
+	var participantNames []string
+	for _, person := range people {
+		if person = strings.TrimSpace(person); person != "" {
+			participantNames = append(participantNames, person)
+		}
+	}
+	if len(participantNames) == 0 {
+		redirectHomeError(w, r, "Add at least one participant")
+		return
+	}
+
+	wallet, err := s.store.AddWallet(name)
 	if err != nil {
-		redirectWithError(w, r, "Invalid date")
-		return
-	}
-
-	expense := Expense{
-		Description: strings.TrimSpace(r.FormValue("description")),
-		Category:    strings.TrimSpace(r.FormValue("category")),
-		PaidBy:      r.FormValue("paid_by"),
-		AmountCents: amountCents,
-		Date:        date,
-	}
-
-	if expense.Description == "" {
-		redirectWithError(w, r, "Description is required")
-		return
-	}
-
-	if expense.Category == "" {
-		expense.Category = "General"
-	}
-
-	if expense.PaidBy != "User A" && expense.PaidBy != "User B" {
-		redirectWithError(w, r, "Invalid person")
-		return
-	}
-
-	if _, err := s.store.Add(expense); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	for _, participant := range participantNames {
+		if err := s.store.AddPerson(wallet.ID, participant); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
-	http.Redirect(w, r, "/?month="+date.Format("2006-01"), http.StatusSeeOther)
+	redirectWallet(w, r, wallet.ID)
 }
 
-/* handleDeleteExpense - removes an expense (POST /expenses/delete).
-*
-* It reads the hidden "id" field, deletes the matching expense from the store,
-* then redirects back to the month the user was viewing (Post/Redirect/Get).
-*
-* Parameters:
-*   - w: the HTTP response writer (used to redirect or report errors).
-*   - r: the incoming request; its "id" and "month" form values are read.
-*
-* Returns:
-*   - Nothing. It always ends by redirecting or writing an error response.
- */
-
-func (s *Server) handleDeleteExpense(w http.ResponseWriter, r *http.Request) {
+/* handleDeleteWallet - deletes a wallet (POST /wallets/delete). */
+func (s *Server) handleDeleteWallet(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		redirectWithError(w, r, "Cannot read form")
+		redirectHomeError(w, r, "Cannot read form")
 		return
 	}
 
 	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 	if err != nil {
-		redirectWithError(w, r, "Invalid expense")
+		redirectHomeError(w, r, "Invalid wallet")
 		return
 	}
 
-	if err := s.store.Delete(id); err != nil {
+	if err := s.store.DeleteWallet(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	month := r.FormValue("month")
-	if month == "" {
-		month = time.Now().Format("2006-01")
-	}
-
-	http.Redirect(w, r, "/?month="+month, http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-/* filterByMonth - keeps only the expenses that fall in a given month.
+/* *****************************************************************************
 *
-* It compares each expense's date, formatted as "2006-01", against the target
-* month string.
+* Handlers - single wallet
 *
-* Parameters:
-*   - expenses: the full list of expenses to filter.
-*   - month:    the target month as "2006-01".
-*
-* Returns:
-*   - A new slice containing only the expenses from that month (may be nil).
- */
+*******************************************************************************/
 
-func filterByMonth(expenses []Expense, month string) []Expense {
-	var filtered []Expense
-	for _, expense := range expenses {
-		if expense.Date.Format("2006-01") == month {
-			filtered = append(filtered, expense)
-		}
+/* handleWallet - renders one wallet's page (GET /wallets/{id}). */
+func (s *Server) handleWallet(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
 	}
 
-	return filtered
+	wallet, err := s.store.GetWallet(id)
+	if err != nil {
+		redirectHomeError(w, r, "Wallet not found")
+		return
+	}
+
+	data := WalletPageData{
+		Wallet:           wallet,
+		Summary:          summarize(wallet),
+		ShowFundingSetup: r.URL.Query().Get("edit-contributions") == "1" || needsFundingSetup(wallet),
+		Error:            r.URL.Query().Get("error"),
+	}
+
+	if err := s.templates.ExecuteTemplate(w, "wallet.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
-/* summarize - computes the monthly totals and the 50/50 settlement.
+/* *****************************************************************************
 *
-* It sums every expense, splitting how much each person paid. Each person's fair
-* share is half the total; User B's share is computed as (total - User A's
-* share) so the two halves always add back to the exact total (no lost cent).
-* The settlement is the size of User A's imbalance, and a sentence explains who
-* owes whom.
+* Handlers - people
 *
-* Parameters:
-*   - expenses: the expenses belonging to the month (already filtered).
-*   - month:    the month being summarised, as "2006-01".
-*
-* Returns:
-*   - A fully populated MonthlySummary.
- */
+*******************************************************************************/
 
-func summarize(expenses []Expense, month string) MonthlySummary {
-	summary := MonthlySummary{Month: month}
+/* handleAddPerson - adds a person to a wallet (POST /wallets/{id}/people). */
+func (s *Server) handleAddPerson(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
 
-	for _, expense := range expenses {
-		summary.TotalCents += expense.AmountCents
-		switch expense.PaidBy {
-		case "User A":
-			summary.UserAPaidCents += expense.AmountCents
-		case "User B":
-			summary.UserBPaidCents += expense.AmountCents
+	if err := r.ParseForm(); err != nil {
+		redirectWalletError(w, r, id, "Cannot read form")
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		redirectWalletError(w, r, id, "Person name is required")
+		return
+	}
+
+	if err := s.store.AddPerson(id, name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	redirectWallet(w, r, id)
+}
+
+/* handleDeletePerson - removes a person (POST /wallets/{id}/people/delete). */
+func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		redirectWalletError(w, r, id, "Cannot read form")
+		return
+	}
+
+	personID, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		redirectWalletError(w, r, id, "Invalid person")
+		return
+	}
+
+	if err := s.store.DeletePerson(id, personID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	redirectWallet(w, r, id)
+}
+
+/* handleFundWallet records every participant's income contribution. */
+func (s *Server) handleFundWallet(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		redirectWalletError(w, r, id, "Cannot read form")
+		return
+	}
+
+	personIDs := r.Form["person_id"]
+	salaries := r.Form["salary"]
+	percentages := r.Form["contribution_percent"]
+	if len(personIDs) == 0 || len(personIDs) != len(salaries) || len(personIDs) != len(percentages) {
+		redirectWalletError(w, r, id, "Complete the funding details for every participant")
+		return
+	}
+
+	funding := make([]Funding, 0, len(personIDs))
+	for i, rawID := range personIDs {
+		personID, err := strconv.ParseInt(rawID, 10, 64)
+		if err != nil {
+			redirectWalletError(w, r, id, "Invalid participant")
+			return
+		}
+		salaryCents, err := parseMoney(salaries[i])
+		if err != nil || salaryCents <= 0 {
+			redirectWalletError(w, r, id, "Enter a valid monthly income")
+			return
+		}
+		percent, err := strconv.ParseInt(percentages[i], 10, 64)
+		if err != nil || percent < 1 || percent > 100 {
+			redirectWalletError(w, r, id, "Contribution percentage must be between 1 and 100")
+			return
+		}
+		funding = append(funding, Funding{PersonID: personID, SalaryCents: salaryCents, ContributionPercent: percent})
+	}
+
+	if err := s.store.FundWallet(id, funding); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	redirectWallet(w, r, id)
+}
+
+/* *****************************************************************************
+*
+* Handlers - expenses
+*
+*******************************************************************************/
+
+/* handleAddExpense - adds an expense (POST /wallets/{id}/expenses). */
+func (s *Server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		redirectWalletError(w, r, id, "Cannot read form")
+		return
+	}
+
+	amountCents, err := parseMoney(r.FormValue("amount"))
+	if err != nil || amountCents <= 0 {
+		redirectWalletError(w, r, id, "Invalid amount")
+		return
+	}
+
+	date, err := time.Parse("2006-01-02", r.FormValue("date"))
+	if err != nil {
+		redirectWalletError(w, r, id, "Invalid date")
+		return
+	}
+
+	paidByID, err := strconv.ParseInt(r.FormValue("paid_by_id"), 10, 64)
+	if err != nil {
+		redirectWalletError(w, r, id, "Choose who paid")
+		return
+	}
+
+	description := strings.TrimSpace(r.FormValue("description"))
+	if description == "" {
+		redirectWalletError(w, r, id, "Description is required")
+		return
+	}
+
+	category := strings.TrimSpace(r.FormValue("category"))
+	if category == "" {
+		category = "General"
+	}
+
+	expense := Expense{
+		Description: description,
+		Category:    category,
+		PaidByID:    paidByID,
+		AmountCents: amountCents,
+		Date:        date,
+		IsPaid:      r.FormValue("payment_status") == "paid",
+	}
+
+	if err := s.store.AddExpense(id, expense); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	redirectWallet(w, r, id)
+}
+
+/* handleDeleteExpense - removes an expense (POST /wallets/{id}/expenses/delete). */
+func (s *Server) handleDeleteExpense(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		redirectWalletError(w, r, id, "Cannot read form")
+		return
+	}
+
+	expenseID, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err != nil {
+		redirectWalletError(w, r, id, "Invalid expense")
+		return
+	}
+
+	if err := s.store.DeleteExpense(id, expenseID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	redirectWallet(w, r, id)
+}
+
+/* *****************************************************************************
+*
+* Business logic
+*
+*******************************************************************************/
+
+func summarize(wallet Wallet) WalletSummary {
+	summary := WalletSummary{}
+	for _, person := range wallet.People {
+		summary.PlannedContributionCents += person.SalaryCents * person.ContributionPercent / 100
+	}
+
+	monthlyExpenses := make(map[string]int64)
+	for _, e := range wallet.Expenses {
+		summary.TotalExpensesCents += e.AmountCents
+		monthlyExpenses[e.Date.Format("2006-01")] += e.AmountCents
+		if e.IsPaid {
+			summary.PaidExpensesCents += e.AmountCents
 		}
 	}
-
-	summary.UserAShareCents = summary.TotalCents / 2
-	summary.UserBShareCents = summary.TotalCents - summary.UserAShareCents
-
-	userABalance := summary.UserAPaidCents - summary.UserAShareCents
-	summary.SettlementCents = abs(userABalance)
-
-	switch {
-	case userABalance > 0:
-		summary.SettlementSentence = "User B should pay User A"
-	case userABalance < 0:
-		summary.SettlementSentence = "User A should pay User B"
-	default:
-		summary.SettlementSentence = "Everything is settled between you"
+	summary.MonthsTracked = len(monthlyExpenses)
+	if summary.MonthsTracked > 0 {
+		summary.AverageMonthlyCents = summary.TotalExpensesCents / int64(summary.MonthsTracked)
 	}
-
+	summary.OutstandingExpensesCents = summary.TotalExpensesCents - summary.PaidExpensesCents
+	summary.BalanceCents = summary.PlannedContributionCents - summary.PaidExpensesCents
 	return summary
 }
+
+func needsFundingSetup(wallet Wallet) bool {
+	for _, person := range wallet.People {
+		if person.SalaryCents <= 0 || person.ContributionPercent <= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+/* *****************************************************************************
+*
+* Formatting / parsing helpers
+*
+*******************************************************************************/
 
 /* parseMoney - converts a user-typed amount into integer cents.
 *
 * It accepts both comma and dot as the decimal separator (e.g. "42,50" or
 * "42.50"), pads a single decimal digit, and rejects empty values, more than one
-* separator, or more than two decimal places. Working in cents keeps all money
-* arithmetic exact.
+* separator, or more than two decimal places.
 *
 * Parameters:
 *   - value: the raw text from the form (e.g. "42,50").
@@ -383,81 +518,56 @@ func parseMoney(value string) (int64, error) {
 	return euros*100 + cents, nil
 }
 
-/* formatMoney - formats an amount in cents for display.
-*
-* It turns integer cents into a euro string with two decimals and the euro sign
-* (e.g. 4250 -> "42,50 €"). Registered as the "money" template helper.
-*
-* Parameters:
-*   - cents: the amount in integer cents.
-*
-* Returns:
-*   - The formatted string, e.g. "42,50 €".
- */
-
+/* formatMoney - formats cents for display, e.g. 4250 -> "42,50 €". */
 func formatMoney(cents int64) string {
-	return fmt.Sprintf("%d,%02d €", cents/100, cents%100)
+	sign := ""
+	if cents < 0 {
+		sign = "-"
+		cents = -cents
+	}
+	return fmt.Sprintf("%s%d,%02d €", sign, cents/100, cents%100)
 }
 
-/* formatDate - formats a date for display.
-*
-* It renders a time.Time as "day/month/year" (e.g. "04/07/2026"). Registered as
-* the "date" template helper.
-*
-* Parameters:
-*   - date: the date to format.
-*
-* Returns:
-*   - The formatted string, e.g. "04/07/2026".
- */
+/* formatMoneyInput - like formatMoney but without the currency symbol, so it can
+*  be placed in an <input value="..."> (e.g. 30000 -> "300,00"). */
+func formatMoneyInput(cents int64) string {
+	return fmt.Sprintf("%d,%02d", cents/100, cents%100)
+}
 
+/* formatDate - renders a time.Time as "02/01/2006". */
 func formatDate(date time.Time) string {
 	return date.Format("02/01/2006")
 }
 
-/* redirectWithError - redirects back to the index page carrying an error.
+/* *****************************************************************************
 *
-* It preserves the current month and attaches the given message as an "error"
-* query parameter, so the dashboard can show a banner. Uses HTTP 303 See Other.
+* Redirect helpers
 *
-* Parameters:
-*   - w:       the HTTP response writer used to issue the redirect.
-*   - r:       the incoming request (its "month" form value is preserved).
-*   - message: the human-readable error to display.
-*
-* Returns:
-*   - Nothing. It writes a redirect response.
- */
+*******************************************************************************/
 
-func redirectWithError(w http.ResponseWriter, r *http.Request, message string) {
-	month := r.FormValue("month")
-	if month == "" {
-		month = time.Now().Format("2006-01")
-	}
-
-	values := url.Values{}
-	values.Set("month", month)
-	values.Set("error", message)
-
-	http.Redirect(w, r, "/?"+values.Encode(), http.StatusSeeOther)
+/* pathID - reads the {id} path segment from the request as an int64. */
+func pathID(r *http.Request) (int64, error) {
+	return strconv.ParseInt(r.PathValue("id"), 10, 64)
 }
 
-/* abs - returns the absolute value of an int64.
-*
-* A small helper used to turn a possibly-negative balance into a positive
-* settlement amount.
-*
-* Parameters:
-*   - value: the number whose magnitude is wanted.
-*
-* Returns:
-*   - The non-negative absolute value of value.
- */
+/* redirectWallet - redirects (303) back to a wallet's page. */
+func redirectWallet(w http.ResponseWriter, r *http.Request, id int64) {
+	http.Redirect(w, r, fmt.Sprintf("/wallets/%d", id), http.StatusSeeOther)
+}
 
-func abs(value int64) int64 {
-	if value < 0 {
-		return -value
-	}
+/* redirectWalletError - redirects back to a wallet's page with an error banner. */
+func redirectWalletError(w http.ResponseWriter, r *http.Request, id int64, message string) {
+	http.Redirect(w, r,
+		fmt.Sprintf("/wallets/%d?error=%s", id, urlEscape(message)),
+		http.StatusSeeOther)
+}
 
-	return value
+/* redirectHomeError - redirects back to the home page with an error banner. */
+func redirectHomeError(w http.ResponseWriter, r *http.Request, message string) {
+	http.Redirect(w, r, "/?error="+urlEscape(message), http.StatusSeeOther)
+}
+
+/* urlEscape - minimal query-value escaping for our short error messages. */
+func urlEscape(s string) string {
+	return strings.ReplaceAll(s, " ", "%20")
 }

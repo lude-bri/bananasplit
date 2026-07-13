@@ -3,111 +3,26 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Split Home</title>
+	<title>BananaSplit</title>
 	<link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-	<main class="shell">
-		<header class="topbar">
-			<div>
-				<p class="eyebrow">Shared account</p>
-				<h1>BananaSplit!</h1>
+	<main class="landing-shell">
+		<section class="landing-card">
+			<span class="logo landing-logo">BS</span>
+			<h1>BananaSplit</h1>
+			<p class="landing-question">What would you like to do?</p>
+			<div class="choice-grid">
+				<a class="choice-card choice-card-active" href="/wallets/new">
+					<strong>Create a new wallet</strong>
+					<span>Set up a shared household budget.</span>
+				</a>
+				<div class="choice-card choice-card-disabled" aria-disabled="true">
+					<strong>Join an existing wallet</strong>
+					<span>Coming soon.</span>
+				</div>
 			</div>
-			<form class="month-picker" method="get" action="/">
-				<label for="month">Month</label>
-				<input id="month" type="month" name="month" value="{{.Month}}">
-				<button type="submit">View</button>
-			</form>
-		</header>
-
-		{{if .Error}}
-			<p class="error">{{.Error}}</p>
-		{{end}}
-
-		<section class="summary-grid" aria-label="Monthly summary">
-			<div class="metric">
-				<span>Total this month</span>
-				<strong>{{money .Summary.TotalCents}}</strong>
-			</div>
-			<div class="metric">
-				<span>User A pagou</span>
-				<strong>{{money .Summary.UserAPaidCents}}</strong>
-			</div>
-			<div class="metric">
-				<span>User B pagou</span>
-				<strong>{{money .Summary.UserBPaidCents}}</strong>
-			</div>
-			<div class="metric highlight">
-				<span>{{.Summary.SettlementSentence}}</span>
-				<strong>{{money .Summary.SettlementCents}}</strong>
-			</div>
-		</section>
-
-		<section class="split">
-			<form class="panel form" method="post" action="/expenses">
-				<h2>New expense</h2>
-				<input type="hidden" name="month" value="{{.Month}}">
-
-				<label for="description">Description</label>
-				<input id="description" name="description" placeholder="Supermarket" required>
-
-				<label for="amount">Amount</label>
-				<input id="amount" name="amount" inputmode="decimal" placeholder="42,50" required>
-
-				<label for="category">Category</label>
-				<input id="category" name="category" placeholder="Food">
-
-				<label for="paid_by">Who paid</label>
-				<select id="paid_by" name="paid_by" required>
-						<option value="User A">User A</option>
-						<option value="User B">User B</option>
-				</select>
-
-				<label for="date">Date</label>
-				<input id="date" type="date" name="date" required>
-
-				<button type="submit">Add</button>
-			</form>
-
-			<section class="panel">
-				<h2>Expenses</h2>
-				{{if .Expenses}}
-					<div class="table-wrap">
-						<table>
-							<thead>
-								<tr>
-									<th>Date</th>
-									<th>Description</th>
-									<th>Category</th>
-									<th>Paid by</th>
-									<th>Amount</th>
-									<th></th>
-								</tr>
-							</thead>
-							<tbody>
-								{{range .Expenses}}
-									<tr>
-										<td>{{date .Date}}</td>
-										<td>{{.Description}}</td>
-										<td>{{.Category}}</td>
-										<td>{{.PaidBy}}</td>
-										<td>{{money .AmountCents}}</td>
-										<td>
-											<form method="post" action="/expenses/delete">
-												<input type="hidden" name="id" value="{{.ID}}">
-												<input type="hidden" name="month" value="{{$.Month}}">
-											<button class="ghost" type="submit">Remove</button>
-										</form>
-									</td>
-								</tr>
-							{{end}}
-							</tbody>
-						</table>
-					</div>
-				{{else}}
-					<p class="empty">No expenses this month yet.</p>
-				{{end}}
-			</section>
+			{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 		</section>
 	</main>
 </body>
