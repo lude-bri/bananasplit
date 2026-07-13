@@ -1,8 +1,8 @@
 # 🍌 BananaSplit
 
 **BananaSplit** is a tiny, self-hosted web app that helps two people track and
-split their shared monthly expenses **50 / 50**. You log who paid for what, and
-BananaSplit tells you — for any given month — the total spent, how much each
+split their shared monthly expenses. You log who paid for what, and
+BananaSplit tells you, for any given month, the total spent, how much each
 person paid, and **who owes whom** to make things even again.
 
 It is written in pure **Go** using only the standard library (no external
