@@ -25,8 +25,7 @@ needed.
 7. [Key design decisions (and *why* they work)](#key-design-decisions-and-why-they-work)
 8. [Running the app](#running-the-app)
 9. [Data & storage](#data--storage)
-10. [Customising the logo](#customising-the-logo)
-11. [Possible next steps](#possible-next-steps)
+10. [Possible next steps](#possible-next-steps)
 
 ---
 
@@ -442,22 +441,6 @@ The schema (in [internal/store/sqlite_store.go](internal/store/sqlite_store.go))
 > `month`) for backwards compatibility, but it stores period keys of **any**
 > granularity — a daily wallet keeps `2026-07-14` there, a yearly one keeps
 > `2026`.
-
----
-
-## Customising the logo
-
-The logo shown in the header and on the landing page is a single image file:
-[web/static/logo.svg](web/static/logo.svg). To use your own, **replace that file**
-with your artwork, keeping the same name — it appears everywhere immediately, and
-the versioned URL means you won't have to clear your cache.
-
-- Prefer an SVG or a roughly **square** image; it's rendered in small rounded
-  boxes (38 px in the header, 52 px on the landing page).
-- Using a PNG/JPG instead? Save it as e.g. `web/static/logo.png` and change the
-  `src` from `logo.svg` to `logo.png` in the three templates
-  ([index.html](web/templates/index.html), [wallet.html](web/templates/wallet.html),
-  [new_wallet.html](web/templates/new_wallet.html)).
 
 ---
 
