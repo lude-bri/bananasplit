@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Wallet.Name}} · BananaSplit</title>
-	<link rel="stylesheet" href="/static/styles.css">
+	<link rel="stylesheet" href="/static/styles.css?v={{assetVersion "styles.css"}}">
 </head>
 <body>
 	<main class="shell">
@@ -14,13 +14,53 @@
 		</header>
 
 		<section class="wallet-title">
-			<p class="eyebrow">Shared household budget</p>
+			<p class="eyebrow">Shared household budget · organised {{periodAdverb .Wallet.PeriodType}}</p>
 			<h1>{{.Wallet.Name}}</h1>
+		</section>
+
+		<section class="panes" aria-label="Budget periods">
+			<div class="pane-tabs" role="tablist">
+				{{range .Wallet.Periods}}
+					<span class="pane-tab{{if eq $.Period .Key}} pane-tab-active{{end}}" role="tab" aria-selected="{{if eq $.Period .Key}}true{{else}}false{{end}}">
+						<a class="pane-tab-link" href="/wallets/{{$.Wallet.ID}}?period={{.Key}}">{{periodLabel $.Wallet.PeriodType .Key}}</a>
+						<form class="pane-delete" method="post" action="/wallets/{{$.Wallet.ID}}/periods/delete" onsubmit="return confirm('Delete {{periodLabel $.Wallet.PeriodType .Key}} and its expenses? This cannot be undone.');">
+							<input type="hidden" name="period" value="{{.Key}}">
+							<button class="pane-delete-btn" type="submit" aria-label="Delete {{periodLabel $.Wallet.PeriodType .Key}}" title="Delete this {{periodUnitNoun $.Wallet.PeriodType}}">×</button>
+						</form>
+					</span>
+				{{end}}
+			</div>
+			<form class="pane-add" method="post" action="/wallets/{{.Wallet.ID}}/periods">
+				{{if eq .Wallet.PeriodType "daily"}}
+					<input name="period" type="date" lang="en" aria-label="New day" required>
+				{{else if eq .Wallet.PeriodType "yearly"}}
+					<input name="period" type="number" min="2000" max="2100" step="1" placeholder="2026" aria-label="New year" required>
+				{{else}}
+					<select name="period_month" aria-label="New month" required>
+						<option value="" disabled selected>Month</option>
+						<option value="01">January</option>
+						<option value="02">February</option>
+						<option value="03">March</option>
+						<option value="04">April</option>
+						<option value="05">May</option>
+						<option value="06">June</option>
+						<option value="07">July</option>
+						<option value="08">August</option>
+						<option value="09">September</option>
+						<option value="10">October</option>
+						<option value="11">November</option>
+						<option value="12">December</option>
+					</select>
+					<input name="period_year" type="number" min="2000" max="2100" step="1" placeholder="Year" aria-label="New year" required>
+				{{end}}
+				<button type="submit">+ Add {{periodUnitNoun .Wallet.PeriodType}}</button>
+			</form>
 		</section>
 		{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
+		{{if .Period}}
 		<section class="balance-hero">
-			<span>Available wallet balance</span>
+			<span>Available wallet balance · {{periodLabel .Wallet.PeriodType .Period}}</span>
 			<strong>{{money .Summary.BalanceCents}}</strong>
 			<p>Planned contributions less expenses marked as paid.</p>
 		</section>
@@ -28,7 +68,7 @@
 			<div class="metric"><span>Planned contributions</span><strong>{{money .Summary.PlannedContributionCents}}</strong></div>
 			<div class="metric"><span>Paid expenses</span><strong>{{money .Summary.PaidExpensesCents}}</strong></div>
 			<div class="metric"><span>Awaiting payment</span><strong>{{money .Summary.OutstandingExpensesCents}}</strong></div>
-			<div class="metric highlight"><span>Average monthly spend</span><strong>{{money .Summary.AverageMonthlyCents}}</strong><small>{{.Summary.MonthsTracked}} month{{if ne .Summary.MonthsTracked 1}}s{{end}} tracked</small></div>
+			<div class="metric highlight"><span>Average {{periodAdverb .Wallet.PeriodType}} spend</span><strong>{{money .Summary.AveragePeriodCents}}</strong><small>{{.Summary.PeriodsTracked}} {{periodUnitNoun .Wallet.PeriodType}}{{if ne .Summary.PeriodsTracked 1}}s{{end}} tracked</small></div>
 		</section>
 
 		<section class="columns">
@@ -37,6 +77,7 @@
 					<h2>Set contribution targets</h2>
 					<p class="field-help">Set this up once for each person. Saving updates their target; it never adds the amount again.</p>
 					<form class="stack-form" method="post" action="/wallets/{{.Wallet.ID}}/fund">
+						<input type="hidden" name="period" value="{{$.Period}}">
 						{{range .Wallet.People}}
 							<fieldset class="funding-row">
 								<legend>{{.Name}}</legend>
@@ -48,7 +89,7 @@
 						<button type="submit">Save contribution targets</button>
 					</form>
 				{{else}}
-					<div class="section-heading"><div><h2>Contribution plan</h2><p class="field-help">Each target is calculated from monthly income × contribution percentage.</p></div><a class="text-link" href="/wallets/{{.Wallet.ID}}?edit-contributions=1">Edit</a></div>
+					<div class="section-heading"><div><h2>Contribution plan</h2><p class="field-help">Each target is calculated from monthly income × contribution percentage.</p></div><a class="text-link" href="/wallets/{{.Wallet.ID}}?period={{$.Period}}&amp;edit-contributions=1">Edit</a></div>
 					<ul class="contribution-list">
 						{{range .Wallet.People}}
 							<li><span><strong>{{.Name}}</strong><small>{{money .SalaryCents}} × {{.ContributionPercent}}%</small></span><strong>{{money (contribution .SalaryCents .ContributionPercent)}}</strong></li>
@@ -59,32 +100,61 @@
 
 			<section class="panel">
 				<h2>Add an expense</h2>
-				<p class="field-help">Only paid expenses reduce the available wallet balance.</p>
+				<p class="field-help">New expenses start as not paid. Mark them as paid in the payment-status table.</p>
 				<form class="stack-form" method="post" action="/wallets/{{.Wallet.ID}}/expenses">
+					<input type="hidden" name="period" value="{{$.Period}}">
 					<label for="description">Description</label><input id="description" name="description" placeholder="Rent" required>
 					<label for="amount">Amount</label><input id="amount" name="amount" inputmode="decimal" placeholder="850.00" required>
-					<label for="category">Category</label><input id="category" name="category" placeholder="Housing">
+					<label for="category">Category</label><input id="category" name="category" list="category-options" placeholder="Housing" autocomplete="off"><datalist id="category-options">{{range .Categories}}<option value="{{.}}"></option>{{end}}</datalist>
 					<label for="paid_by_id">Added by</label><select id="paid_by_id" name="paid_by_id" required>{{range .Wallet.People}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
-					<label for="payment-status">Payment status</label><select id="payment-status" name="payment_status"><option value="unpaid">Not paid</option><option value="paid">Paid</option></select>
-					<label for="date">Date</label><input id="date" type="date" name="date" required>
+					<label for="date">Date</label><input id="date" type="date" lang="en" name="date" value="{{if eq .Wallet.PeriodType "daily"}}{{$.Period}}{{else if eq .Wallet.PeriodType "yearly"}}{{$.Period}}-01-01{{else}}{{$.Period}}-01{{end}}" required>
 					<button type="submit">Add expense</button>
 				</form>
 			</section>
 		</section>
-
 		<section class="section panel">
-			<div class="section-heading"><div><h2>Spending report</h2><p class="field-help">The monthly average includes every recorded expense, paid or not paid.</p></div><strong class="report-value">{{money .Summary.AverageMonthlyCents}} / month</strong></div>
-			<div class="report-progress" aria-label="{{.Summary.MonthsTracked}} months tracked"><span style="width: {{if .Summary.MonthsTracked}}100{{else}}0{{end}}%"></span></div>
-		</section>
-
-		<section class="section panel">
-			<h2>Expense history</h2>
-			{{if .Wallet.Expenses}}
-				<div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Status</th><th>Amount</th><th></th></tr></thead><tbody>
-				{{range .Wallet.Expenses}}<tr><td>{{date .Date}}</td><td>{{.Description}}</td><td>{{.Category}}</td><td>{{if .IsPaid}}<span class="status paid">Paid</span>{{else}}<span class="status unpaid">Not paid</span>{{end}}</td><td>{{money .AmountCents}}</td><td><form method="post" action="/wallets/{{$.Wallet.ID}}/expenses/delete"><input type="hidden" name="id" value="{{.ID}}"><button class="ghost" type="submit">Remove</button></form></td></tr>{{end}}
+			<div class="section-heading"><div><h2>Payment status</h2><p class="field-help">Mark an expense as paid when the payment has been made.</p></div><strong class="report-value">{{money .Summary.OutstandingExpensesCents}} pending</strong></div>
+			{{if .UnpaidExpenses}}
+				<div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th></th></tr></thead><tbody>
+				{{range .UnpaidExpenses}}<tr><td>{{date .Date}}</td><td>{{.Description}}</td><td>{{.Category}}</td><td>{{money .AmountCents}}</td><td><div class="row-actions"><form method="post" action="/wallets/{{$.Wallet.ID}}/expenses/{{.ID}}/paid"><input type="hidden" name="period" value="{{$.Period}}"><button type="submit">Mark as paid</button></form><form method="post" action="/wallets/{{$.Wallet.ID}}/expenses/delete" onsubmit="return confirm('Delete this expense? This cannot be undone.');"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="period" value="{{$.Period}}"><button class="ghost" type="submit">Remove</button></form></div></td></tr>{{end}}
 				</tbody></table></div>
-			{{else}}<p class="empty">No expenses yet. Add your first household expense above.</p>{{end}}
+			{{else}}<p class="empty">Everything is paid. Nice work.</p>{{end}}
 		</section>
+
+		<section class="section panel">
+			<div class="section-heading"><div><h2>Spending report</h2><p class="field-help">The {{periodAdverb .Wallet.PeriodType}} average includes every recorded expense, paid or not paid.</p></div><strong class="report-value">{{money .Summary.AveragePeriodCents}} / {{periodUnitNoun .Wallet.PeriodType}}</strong></div>
+			<div class="report-progress" aria-label="{{.Summary.PeriodsTracked}} {{periodUnitNoun .Wallet.PeriodType}}s tracked"><span style="width: {{if .Summary.PeriodsTracked}}100{{else}}0{{end}}%"></span></div>
+		</section>
+
+		{{if .Summary.CategoryAverages}}
+		<section class="section panel">
+			<div class="section-heading"><div><h2>Average spend by category</h2><p class="field-help">Typical {{periodAdverb .Wallet.PeriodType}} spend per category, across every {{periodUnitNoun .Wallet.PeriodType}} tracked.</p></div></div>
+			<ul class="category-list">
+				{{$top := (index .Summary.CategoryAverages 0).AverageCents}}
+				{{range .Summary.CategoryAverages}}
+					<li>
+						<div class="category-row"><span><strong>{{.Name}}</strong><small>{{money .TotalCents}} total</small></span><strong>{{money .AverageCents}} / {{periodUnitNoun $.Wallet.PeriodType}}</strong></div>
+						<div class="report-progress"><span style="width: {{percent .AverageCents $top}}%"></span></div>
+					</li>
+				{{end}}
+			</ul>
+		</section>
+		{{end}}
+
+		<section class="section panel">
+			<h2>Paid expense history</h2>
+			{{if .PaidExpenses}}
+				<div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th></th></tr></thead><tbody>
+				{{range .PaidExpenses}}<tr><td>{{date .Date}}</td><td>{{.Description}}</td><td>{{.Category}}</td><td>{{money .AmountCents}}</td><td><form method="post" action="/wallets/{{$.Wallet.ID}}/expenses/delete"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="period" value="{{$.Period}}"><button class="ghost" type="submit">Remove</button></form></td></tr>{{end}}
+				</tbody></table></div>
+			{{else}}<p class="empty">No paid expenses yet.</p>{{end}}
+		</section>
+		{{else}}
+		<section class="section panel empty-state">
+			<h2>No {{periodUnitNoun .Wallet.PeriodType}}s yet</h2>
+			<p class="field-help">Add a {{periodUnitNoun .Wallet.PeriodType}} above to start tracking expenses for this wallet.</p>
+		</section>
+		{{end}}
 	</main>
 </body>
 </html>

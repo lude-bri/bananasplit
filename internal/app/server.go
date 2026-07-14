@@ -25,6 +25,9 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,13 +47,18 @@ type Server struct {
 
 /* IndexPageData - the view-model handed to index.html. */
 type IndexPageData struct {
-	Error string
+	Wallets []Wallet
+	Error   string
 }
 
 /* WalletPageData - the view-model handed to wallet.html. */
 type WalletPageData struct {
 	Wallet           Wallet
 	Summary          WalletSummary
+	Period           string
+	UnpaidExpenses   []Expense
+	PaidExpenses     []Expense
+	Categories       []string
 	ShowFundingSetup bool
 	Error            string
 }
@@ -73,13 +81,45 @@ func NewServer(store WalletStore) (*Server, error) {
 		"money":        formatMoney,
 		"moneyInput":   formatMoneyInput,
 		"contribution": func(salary, percent int64) int64 { return salary * percent / 100 },
-		"date":         formatDate,
+		"percent": func(part, whole int64) int64 {
+			if whole <= 0 {
+				return 0
+			}
+			return part * 100 / whole
+		},
+		"periodLabel":    periodLabel,
+		"periodAdverb":   periodAdverb,
+		"periodUnitNoun": periodUnitNoun,
+		"date":           formatDate,
+		"assetVersion":   assetVersion,
 	}).ParseGlob("web/templates/*.html")
 	if err != nil {
 		return nil, err
 	}
 
 	return &Server{store: store, templates: templates}, nil
+}
+
+/* assetVersion - the modification time (unix seconds) of a file under
+*  web/static, used as a ?v= cache-buster on asset links so a changed CSS/JS
+*  file is always re-fetched even by browsers holding a stale cached copy. */
+func assetVersion(name string) int64 {
+	info, err := os.Stat(filepath.Join("web/static", name))
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().Unix()
+}
+
+/* noCache - forces the browser to revalidate on every request, so CSS/JS edits
+*  and freshly-changed wallet data always show up without a manual hard-refresh
+*  (e.g. switching panes always reflects that period's expenses). Static files
+*  are still served with 304s when nothing changed. */
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		h.ServeHTTP(w, r)
+	})
 }
 
 /* Routes - declares the URL routing table and returns the HTTP handler. */
@@ -92,6 +132,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /wallets/new", s.handleNewWallet)
 	mux.HandleFunc("POST /wallets", s.handleCreateWallet)
+	mux.HandleFunc("POST /wallets/{id}/periods", s.handleAddPeriod)
+	mux.HandleFunc("POST /wallets/{id}/periods/delete", s.handleDeletePeriod)
 	mux.HandleFunc("POST /wallets/delete", s.handleDeleteWallet)
 
 	// Single wallet
@@ -104,9 +146,10 @@ func (s *Server) Routes() http.Handler {
 
 	// Expenses
 	mux.HandleFunc("POST /wallets/{id}/expenses", s.handleAddExpense)
+	mux.HandleFunc("POST /wallets/{id}/expenses/{expenseID}/paid", s.handleMarkExpensePaid)
 	mux.HandleFunc("POST /wallets/{id}/expenses/delete", s.handleDeleteExpense)
 
-	return mux
+	return noCache(mux)
 }
 
 /* *****************************************************************************
@@ -115,10 +158,16 @@ func (s *Server) Routes() http.Handler {
 *
 *******************************************************************************/
 
-/* handleIndex renders the landing page. */
+/* handleIndex renders the landing page, listing any wallets already created. */
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	wallets, err := s.store.AllWallets()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	data := IndexPageData{
-		Error: r.URL.Query().Get("error"),
+		Wallets: wallets,
+		Error:   r.URL.Query().Get("error"),
 	}
 
 	if err := s.templates.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -158,7 +207,15 @@ func (s *Server) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wallet, err := s.store.AddWallet(name)
+	periodType := normalizePeriodType(r.FormValue("period"))
+	// The starting pane. Falls back to the current period when left empty or
+	// invalid, so the wallet always opens on a valid pane.
+	start := readPeriodKey(r, "start", periodType)
+	if !validPeriodKey(start, periodType) {
+		start = periodKeyOf(time.Now(), periodType)
+	}
+
+	wallet, err := s.store.AddWallet(name, periodType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -169,8 +226,57 @@ func (s *Server) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := s.store.AddPeriod(wallet.ID, start); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	redirectWallet(w, r, wallet.ID)
+	redirectWalletPeriod(w, r, wallet.ID, start)
+}
+
+// handleAddPeriod makes a new period (pane) available on a wallet dashboard.
+func (s *Server) handleAddPeriod(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+	wallet, err := s.store.GetWallet(id)
+	if err != nil {
+		redirectHomeError(w, r, "Wallet not found")
+		return
+	}
+	period := readPeriodKey(r, "period", wallet.PeriodType)
+	if !validPeriodKey(period, wallet.PeriodType) {
+		redirectWalletError(w, r, id, "Choose a valid "+periodUnitNoun(wallet.PeriodType))
+		return
+	}
+	if err := s.store.AddPeriod(id, period); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	redirectWalletPeriod(w, r, id, period)
+}
+
+// handleDeletePeriod removes a pane and the expenses inside it.
+func (s *Server) handleDeletePeriod(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+	period := r.FormValue("period")
+	if period == "" {
+		redirectWalletError(w, r, id, "Invalid period")
+		return
+	}
+	if err := s.store.DeletePeriod(id, period); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Land on a remaining pane (handleWallet picks the first, or re-creates the
+	// current period if this was the last one).
+	redirectWallet(w, r, id)
 }
 
 /* handleDeleteWallet - deletes a wallet (POST /wallets/delete). */
@@ -214,11 +320,33 @@ func (s *Server) handleWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A wallet with no periods renders an empty state (period == "") that just
+	// invites the user to add one. Deleting the last pane is allowed and lands
+	// here, rather than silently re-creating the current period.
+	period := r.URL.Query().Get("period")
+	if !walletHasPeriod(wallet, period) {
+		period = ""
+		if len(wallet.Periods) > 0 {
+			period = wallet.Periods[0].Key
+		}
+	}
 	data := WalletPageData{
 		Wallet:           wallet,
-		Summary:          summarize(wallet),
+		Summary:          summarize(wallet, period),
+		Period:           period,
+		Categories:       distinctCategories(wallet.Expenses),
 		ShowFundingSetup: r.URL.Query().Get("edit-contributions") == "1" || needsFundingSetup(wallet),
 		Error:            r.URL.Query().Get("error"),
+	}
+	for _, expense := range wallet.Expenses {
+		if periodKeyOf(expense.Date, wallet.PeriodType) != period {
+			continue
+		}
+		if expense.IsPaid {
+			data.PaidExpenses = append(data.PaidExpenses, expense)
+		} else {
+			data.UnpaidExpenses = append(data.UnpaidExpenses, expense)
+		}
 	}
 
 	if err := s.templates.ExecuteTemplate(w, "wallet.html", data); err != nil {
@@ -330,7 +458,7 @@ func (s *Server) handleFundWallet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	redirectWallet(w, r, id)
+	redirectWalletPeriod(w, r, id, r.FormValue("period"))
 }
 
 /* *****************************************************************************
@@ -344,6 +472,12 @@ func (s *Server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
 		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+
+	wallet, err := s.store.GetWallet(id)
+	if err != nil {
+		redirectHomeError(w, r, "Wallet not found")
 		return
 	}
 
@@ -361,6 +495,11 @@ func (s *Server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 	date, err := time.Parse("2006-01-02", r.FormValue("date"))
 	if err != nil {
 		redirectWalletError(w, r, id, "Invalid date")
+		return
+	}
+	period := r.FormValue("period")
+	if !validPeriodKey(period, wallet.PeriodType) || periodKeyOf(date, wallet.PeriodType) != period {
+		redirectWalletError(w, r, id, "Choose a date inside the selected "+periodUnitNoun(wallet.PeriodType))
 		return
 	}
 
@@ -387,7 +526,7 @@ func (s *Server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 		PaidByID:    paidByID,
 		AmountCents: amountCents,
 		Date:        date,
-		IsPaid:      r.FormValue("payment_status") == "paid",
+		IsPaid:      false,
 	}
 
 	if err := s.store.AddExpense(id, expense); err != nil {
@@ -395,7 +534,26 @@ func (s *Server) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectWallet(w, r, id)
+	redirectWalletPeriod(w, r, id, period)
+}
+
+// handleMarkExpensePaid moves an expense out of the pending payment list.
+func (s *Server) handleMarkExpensePaid(w http.ResponseWriter, r *http.Request) {
+	walletID, err := pathID(r)
+	if err != nil {
+		redirectHomeError(w, r, "Invalid wallet")
+		return
+	}
+	expenseID, err := strconv.ParseInt(r.PathValue("expenseID"), 10, 64)
+	if err != nil {
+		redirectWalletError(w, r, walletID, "Invalid expense")
+		return
+	}
+	if err := s.store.MarkExpensePaid(walletID, expenseID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	redirectWalletPeriod(w, r, walletID, r.FormValue("period"))
 }
 
 /* handleDeleteExpense - removes an expense (POST /wallets/{id}/expenses/delete). */
@@ -422,7 +580,7 @@ func (s *Server) handleDeleteExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectWallet(w, r, id)
+	redirectWalletPeriod(w, r, id, r.FormValue("period"))
 }
 
 /* *****************************************************************************
@@ -431,27 +589,184 @@ func (s *Server) handleDeleteExpense(w http.ResponseWriter, r *http.Request) {
 *
 *******************************************************************************/
 
-func summarize(wallet Wallet) WalletSummary {
+func summarize(wallet Wallet, selectedPeriod string) WalletSummary {
 	summary := WalletSummary{}
 	for _, person := range wallet.People {
 		summary.PlannedContributionCents += person.SalaryCents * person.ContributionPercent / 100
 	}
 
-	monthlyExpenses := make(map[string]int64)
+	periods := make(map[string]struct{}, len(wallet.Periods))
+	for _, period := range wallet.Periods {
+		periods[period.Key] = struct{}{}
+	}
+	categoryTotals := make(map[string]int64)
+	var allExpensesCents int64
 	for _, e := range wallet.Expenses {
-		summary.TotalExpensesCents += e.AmountCents
-		monthlyExpenses[e.Date.Format("2006-01")] += e.AmountCents
-		if e.IsPaid {
-			summary.PaidExpensesCents += e.AmountCents
+		key := periodKeyOf(e.Date, wallet.PeriodType)
+		periods[key] = struct{}{}
+		allExpensesCents += e.AmountCents
+		categoryTotals[e.Category] += e.AmountCents
+		if key == selectedPeriod {
+			summary.TotalExpensesCents += e.AmountCents
+			if e.IsPaid {
+				summary.PaidExpensesCents += e.AmountCents
+			}
 		}
 	}
-	summary.MonthsTracked = len(monthlyExpenses)
-	if summary.MonthsTracked > 0 {
-		summary.AverageMonthlyCents = summary.TotalExpensesCents / int64(summary.MonthsTracked)
+	summary.PeriodsTracked = len(periods)
+	if summary.PeriodsTracked > 0 {
+		summary.AveragePeriodCents = allExpensesCents / int64(summary.PeriodsTracked)
+		summary.CategoryAverages = categoryAverages(categoryTotals, summary.PeriodsTracked)
 	}
 	summary.OutstandingExpensesCents = summary.TotalExpensesCents - summary.PaidExpensesCents
 	summary.BalanceCents = summary.PlannedContributionCents - summary.PaidExpensesCents
 	return summary
+}
+
+/* categoryAverages - turns per-category totals into a slice sorted by average
+*  spend (highest first), so the biggest categories lead the report. */
+func categoryAverages(totals map[string]int64, periodsTracked int) []CategoryAverage {
+	averages := make([]CategoryAverage, 0, len(totals))
+	for name, total := range totals {
+		averages = append(averages, CategoryAverage{
+			Name:         name,
+			TotalCents:   total,
+			AverageCents: total / int64(periodsTracked),
+		})
+	}
+	sort.Slice(averages, func(i, j int) bool {
+		if averages[i].AverageCents != averages[j].AverageCents {
+			return averages[i].AverageCents > averages[j].AverageCents
+		}
+		return averages[i].Name < averages[j].Name
+	})
+	return averages
+}
+
+/* distinctCategories - the wallet's category labels, de-duplicated and sorted,
+*  used to suggest previously-typed categories on the expense form. */
+func distinctCategories(expenses []Expense) []string {
+	seen := make(map[string]struct{}, len(expenses))
+	var categories []string
+	for _, e := range expenses {
+		if e.Category == "" {
+			continue
+		}
+		if _, ok := seen[e.Category]; ok {
+			continue
+		}
+		seen[e.Category] = struct{}{}
+		categories = append(categories, e.Category)
+	}
+	sort.Strings(categories)
+	return categories
+}
+
+func walletHasPeriod(wallet Wallet, period string) bool {
+	for _, candidate := range wallet.Periods {
+		if candidate.Key == period {
+			return true
+		}
+	}
+	return false
+}
+
+/* *****************************************************************************
+*
+* Period helpers - map a wallet's granularity to key formats and labels.
+*
+*******************************************************************************/
+
+/* normalizePeriodType - coerces free-form input to a supported granularity,
+*  defaulting to monthly. */
+func normalizePeriodType(periodType string) string {
+	switch periodType {
+	case PeriodDaily, PeriodMonthly, PeriodYearly:
+		return periodType
+	default:
+		return PeriodMonthly
+	}
+}
+
+/* periodKeyLayout - the time layout used to render/parse a period key. */
+func periodKeyLayout(periodType string) string {
+	switch normalizePeriodType(periodType) {
+	case PeriodDaily:
+		return "2006-01-02"
+	case PeriodYearly:
+		return "2006"
+	default:
+		return "2006-01"
+	}
+}
+
+/* periodKeyOf - renders a time as the period key for a granularity. */
+func periodKeyOf(t time.Time, periodType string) string {
+	return t.Format(periodKeyLayout(periodType))
+}
+
+/* readPeriodKey - reads a period key from a form for a given granularity.
+*
+* Monthly panes are picked with an English month dropdown plus a year field
+* (the native <input type="month"> can't be forced out of the browser locale),
+* submitted as "<field>_month" + "<field>_year" and joined into "YYYY-MM".
+* Daily and yearly panes come straight from a single "<field>" input. */
+func readPeriodKey(r *http.Request, field, periodType string) string {
+	if normalizePeriodType(periodType) == PeriodMonthly {
+		year := strings.TrimSpace(r.FormValue(field + "_year"))
+		month := strings.TrimSpace(r.FormValue(field + "_month"))
+		if year == "" || month == "" {
+			return ""
+		}
+		return year + "-" + month
+	}
+	return strings.TrimSpace(r.FormValue(field))
+}
+
+/* validPeriodKey - reports whether key is well-formed for the granularity. */
+func validPeriodKey(key, periodType string) bool {
+	_, err := time.Parse(periodKeyLayout(periodType), key)
+	return err == nil
+}
+
+/* periodLabel - a human-friendly label for a period key (template helper). */
+func periodLabel(periodType, key string) string {
+	t, err := time.Parse(periodKeyLayout(periodType), key)
+	if err != nil {
+		return key
+	}
+	switch normalizePeriodType(periodType) {
+	case PeriodDaily:
+		return t.Format("2 Jan 2006")
+	case PeriodYearly:
+		return t.Format("2006")
+	default:
+		return t.Format("January 2006")
+	}
+}
+
+/* periodAdverb - "daily" / "monthly" / "yearly" (template helper). */
+func periodAdverb(periodType string) string {
+	switch normalizePeriodType(periodType) {
+	case PeriodDaily:
+		return "daily"
+	case PeriodYearly:
+		return "yearly"
+	default:
+		return "monthly"
+	}
+}
+
+/* periodUnitNoun - "day" / "month" / "year" (template helper). */
+func periodUnitNoun(periodType string) string {
+	switch normalizePeriodType(periodType) {
+	case PeriodDaily:
+		return "day"
+	case PeriodYearly:
+		return "year"
+	default:
+		return "month"
+	}
 }
 
 func needsFundingSetup(wallet Wallet) bool {
@@ -553,6 +868,15 @@ func pathID(r *http.Request) (int64, error) {
 /* redirectWallet - redirects (303) back to a wallet's page. */
 func redirectWallet(w http.ResponseWriter, r *http.Request, id int64) {
 	http.Redirect(w, r, fmt.Sprintf("/wallets/%d", id), http.StatusSeeOther)
+}
+
+// redirectWalletPeriod returns to the selected period when one is given.
+func redirectWalletPeriod(w http.ResponseWriter, r *http.Request, id int64, period string) {
+	if period == "" {
+		redirectWallet(w, r, id)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/wallets/%d?period=%s", id, period), http.StatusSeeOther)
 }
 
 /* redirectWalletError - redirects back to a wallet's page with an error banner. */

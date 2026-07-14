@@ -4,24 +4,43 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>BananaSplit</title>
-	<link rel="stylesheet" href="/static/styles.css">
+	<link rel="stylesheet" href="/static/styles.css?v={{assetVersion "styles.css"}}">
 </head>
 <body>
 	<main class="landing-shell">
 		<section class="landing-card">
 			<span class="logo landing-logo">BS</span>
 			<h1>BananaSplit</h1>
-			<p class="landing-question">What would you like to do?</p>
-			<div class="choice-grid">
-				<a class="choice-card choice-card-active" href="/wallets/new">
-					<strong>Create a new wallet</strong>
-					<span>Set up a shared household budget.</span>
-				</a>
-				<div class="choice-card choice-card-disabled" aria-disabled="true">
-					<strong>Join an existing wallet</strong>
-					<span>Coming soon.</span>
+			{{if .Wallets}}
+				<p class="landing-question">Your wallets</p>
+				<div class="wallet-cards">
+					{{range .Wallets}}
+						<div class="wallet-card">
+							<a class="wallet-card-link" href="/wallets/{{.ID}}">
+								<strong>{{.Name}}</strong>
+								<span>Organised {{periodAdverb .PeriodType}}</span>
+							</a>
+							<form method="post" action="/wallets/delete" onsubmit="return confirm('Delete this wallet and all its data? This cannot be undone.');">
+								<input type="hidden" name="id" value="{{.ID}}">
+								<button class="wallet-delete-btn" type="submit" aria-label="Delete {{.Name}}" title="Delete wallet">×</button>
+							</form>
+						</div>
+					{{end}}
 				</div>
-			</div>
+				<a class="button-link" href="/wallets/new">+ Create a new wallet</a>
+			{{else}}
+				<p class="landing-question">What would you like to do?</p>
+				<div class="choice-grid">
+					<a class="choice-card choice-card-active" href="/wallets/new">
+						<strong>Create a new wallet</strong>
+						<span>Set up a shared household budget.</span>
+					</a>
+					<div class="choice-card choice-card-disabled" aria-disabled="true">
+						<strong>Join an existing wallet</strong>
+						<span>Coming soon.</span>
+					</div>
+				</div>
+			{{end}}
 			{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 		</section>
 	</main>

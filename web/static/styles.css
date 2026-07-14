@@ -128,6 +128,86 @@ body {
 	cursor: not-allowed;
 }
 
+.wallet-cards {
+	display: grid;
+	gap: 10px;
+	margin-bottom: 18px;
+	text-align: left;
+}
+
+.wallet-card {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding-right: 10px;
+	border: 1px solid #d4e1d3;
+	border-radius: 12px;
+	background: rgb(255 255 255 / 85%);
+}
+
+.wallet-card:hover {
+	border-color: #1f6f54;
+	box-shadow: 0 12px 24px rgb(31 111 84 / 14%);
+}
+
+.wallet-card-link {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-width: 0;
+	padding: 16px 6px 16px 18px;
+	color: inherit;
+	text-decoration: none;
+}
+
+.wallet-card span {
+	color: #627067;
+	font-size: 0.9rem;
+	white-space: nowrap;
+}
+
+.wallet-card form {
+	display: flex;
+	margin: 0;
+}
+
+.wallet-delete-btn {
+	flex-shrink: 0;
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	min-height: auto;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: #9aa79e;
+	font-size: 1.25rem;
+	line-height: 1;
+}
+
+.wallet-delete-btn:hover {
+	background: #fff1f1;
+	color: #9a2f2f;
+}
+
+.button-link {
+	display: inline-block;
+	padding: 11px 18px;
+	border-radius: 8px;
+	background: #1f6f54;
+	color: #fff;
+	font-weight: 750;
+	text-decoration: none;
+}
+
+.button-link:hover {
+	background: #185640;
+}
+
 .app-header {
 	display: flex;
 	align-items: center;
@@ -436,6 +516,40 @@ button:hover {
 	color: #1f6f54;
 }
 
+.category-list {
+	display: grid;
+	gap: 16px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.category-list li {
+	display: grid;
+	gap: 7px;
+}
+
+.category-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 16px;
+}
+
+.category-row > span {
+	display: grid;
+	gap: 3px;
+}
+
+.category-row small {
+	color: #627067;
+}
+
+.category-row > strong {
+	white-space: nowrap;
+	color: #1f6f54;
+}
+
 .report-progress {
 	height: 8px;
 	overflow: hidden;
@@ -541,6 +655,166 @@ th {
 	color: #657169;
 }
 
+.row-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+.empty-state {
+	text-align: center;
+}
+
+.empty-state h2 {
+	margin-top: 0;
+}
+
+/* Panes - the period tab strip (Excel-sheet style). */
+.panes {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 18px;
+	border-bottom: 2px solid #dfe6e0;
+}
+
+.pane-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.pane-tab {
+	display: inline-flex;
+	align-items: center;
+	margin-bottom: -2px;
+	border: 1px solid transparent;
+	border-bottom: 2px solid transparent;
+	border-radius: 8px 8px 0 0;
+}
+
+.pane-tab:hover {
+	background: #eaf4ee;
+}
+
+.pane-tab-active {
+	border-color: #dfe6e0;
+	border-bottom-color: #fff;
+	background: #fff;
+}
+
+.pane-tab-link {
+	padding: 10px 6px 10px 16px;
+	color: #627067;
+	font-weight: 700;
+	text-decoration: none;
+}
+
+.pane-tab:hover .pane-tab-link {
+	color: #185640;
+}
+
+.pane-tab-active .pane-tab-link {
+	color: #153326;
+}
+
+.pane-delete {
+	display: flex;
+	margin: 0;
+	padding-right: 8px;
+}
+
+.pane-delete-btn {
+	display: grid;
+	place-items: center;
+	width: 22px;
+	height: 22px;
+	min-height: auto;
+	padding: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: #9aa79e;
+	font-size: 1.15rem;
+	line-height: 1;
+}
+
+.pane-delete-btn:hover {
+	background: #fff1f1;
+	color: #9a2f2f;
+}
+
+.pane-add {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.pane-add input {
+	min-height: 38px;
+}
+
+.pane-add button {
+	min-height: 38px;
+	white-space: nowrap;
+}
+
+/* Period choice - radio cards on the create-wallet form. */
+.period-choice {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 10px;
+	margin-top: 8px;
+}
+
+.period-option {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 0;
+	padding: 12px;
+	border: 1px solid #d4e1d3;
+	border-radius: 8px;
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.period-option:has(input:checked) {
+	border-color: #1f6f54;
+	background: #eaf4ee;
+	box-shadow: 0 0 0 1px #1f6f54;
+}
+
+.period-option input {
+	min-height: auto;
+	width: auto;
+	accent-color: #1f6f54;
+}
+
+.period-option span {
+	display: grid;
+	gap: 2px;
+}
+
+.period-option small {
+	color: #627067;
+	font-weight: 500;
+}
+
+.period-start {
+	margin-top: 8px;
+}
+
+.start-field {
+	display: flex;
+	gap: 8px;
+}
+
+.start-field[hidden] {
+	display: none;
+}
+
 @media (max-width: 880px) {
 	.topbar,
 	.month-picker {
@@ -553,6 +827,7 @@ th {
 	.columns,
 	.summary-pair,
 	.choice-grid,
+	.period-choice,
 	.funding-row {
 		grid-template-columns: 1fr;
 	}

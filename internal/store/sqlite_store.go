@@ -76,8 +76,18 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 
 	schema := `
 	CREATE TABLE IF NOT EXISTS wallets (
-		id   INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT NOT NULL
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		name        TEXT NOT NULL,
+		period_type TEXT NOT NULL DEFAULT 'monthly'
+	);
+
+	-- Physically named budget_months for backwards compatibility, but the
+	-- "month" column stores a period key of any granularity (day/month/year).
+	CREATE TABLE IF NOT EXISTS budget_months (
+		wallet_id INTEGER NOT NULL,
+		month     TEXT NOT NULL,
+		PRIMARY KEY (wallet_id, month),
+		FOREIGN KEY (wallet_id) REFERENCES wallets(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS people (
@@ -116,6 +126,9 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	}
 	// Keep databases created by previous versions compatible with the new
 	// funding fields. SQLite has no ADD COLUMN IF NOT EXISTS syntax.
+	if err := addColumnIfMissing(db, "wallets", "period_type", "TEXT NOT NULL DEFAULT 'monthly'"); err != nil {
+		return nil, err
+	}
 	if err := addColumnIfMissing(db, "people", "salary_cents", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return nil, err
 	}
@@ -142,7 +155,7 @@ func (s *SQLiteStore) Close() error {
 
 /* AllWallets - returns every wallet with its people and expenses loaded. */
 func (s *SQLiteStore) AllWallets() ([]app.Wallet, error) {
-	rows, err := s.db.Query(`SELECT id, name FROM wallets ORDER BY name;`)
+	rows, err := s.db.Query(`SELECT id, name, period_type FROM wallets ORDER BY name;`)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +164,7 @@ func (s *SQLiteStore) AllWallets() ([]app.Wallet, error) {
 	var wallets []app.Wallet
 	for rows.Next() {
 		var w app.Wallet
-		if err := rows.Scan(&w.ID, &w.Name); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.PeriodType); err != nil {
 			return nil, err
 		}
 		wallets = append(wallets, w)
@@ -161,6 +174,11 @@ func (s *SQLiteStore) AllWallets() ([]app.Wallet, error) {
 	}
 
 	for i := range wallets {
+		periods, err := s.periodsOf(wallets[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		wallets[i].Periods = periods
 		people, err := s.peopleOf(wallets[i].ID)
 		if err != nil {
 			return nil, err
@@ -184,14 +202,20 @@ func (s *SQLiteStore) AllWallets() ([]app.Wallet, error) {
 /* GetWallet - returns a single wallet (with people and expenses) by ID. */
 func (s *SQLiteStore) GetWallet(id int64) (app.Wallet, error) {
 	var w app.Wallet
-	err := s.db.QueryRow(`SELECT id, name FROM wallets WHERE id = ?;`, id).
-		Scan(&w.ID, &w.Name)
+	err := s.db.QueryRow(`SELECT id, name, period_type FROM wallets WHERE id = ?;`, id).
+		Scan(&w.ID, &w.Name, &w.PeriodType)
 	if err == sql.ErrNoRows {
 		return app.Wallet{}, fmt.Errorf("wallet %d not found", id)
 	}
 	if err != nil {
 		return app.Wallet{}, err
 	}
+
+	periods, err := s.periodsOf(id)
+	if err != nil {
+		return app.Wallet{}, err
+	}
+	w.Periods = periods
 
 	people, err := s.peopleOf(id)
 	if err != nil {
@@ -213,8 +237,8 @@ func (s *SQLiteStore) GetWallet(id int64) (app.Wallet, error) {
 }
 
 /* AddWallet - inserts a new wallet and returns it with its assigned ID. */
-func (s *SQLiteStore) AddWallet(name string) (app.Wallet, error) {
-	res, err := s.db.Exec(`INSERT INTO wallets (name) VALUES (?);`, name)
+func (s *SQLiteStore) AddWallet(name, periodType string) (app.Wallet, error) {
+	res, err := s.db.Exec(`INSERT INTO wallets (name, period_type) VALUES (?, ?);`, name, periodType)
 	if err != nil {
 		return app.Wallet{}, err
 	}
@@ -224,13 +248,49 @@ func (s *SQLiteStore) AddWallet(name string) (app.Wallet, error) {
 		return app.Wallet{}, err
 	}
 
-	return app.Wallet{ID: id, Name: name}, nil
+	return app.Wallet{ID: id, Name: name, PeriodType: periodType}, nil
 }
 
 /* DeleteWallet - removes a wallet (its people and expenses cascade away). */
 func (s *SQLiteStore) DeleteWallet(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM wallets WHERE id = ?;`, id)
 	return err
+}
+
+// AddPeriod makes a period (pane) available in a wallet. It is idempotent so
+// selecting an existing period never duplicates it.
+func (s *SQLiteStore) AddPeriod(walletID int64, periodKey string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO budget_months (wallet_id, month) VALUES (?, ?) ON CONFLICT(wallet_id, month) DO NOTHING`,
+		walletID, periodKey,
+	)
+	return err
+}
+
+// DeletePeriod removes a pane and every expense that falls inside it. Expenses
+// carry a full RFC3339 date whose prefix is the period key (e.g. "2026-07" for
+// a monthly pane), so a prefix match scopes the deletion to that period.
+func (s *SQLiteStore) DeletePeriod(walletID int64, periodKey string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`DELETE FROM expenses WHERE wallet_id = ? AND date LIKE ? || '%'`,
+		walletID, periodKey,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM budget_months WHERE wallet_id = ? AND month = ?`,
+		walletID, periodKey,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 /* *****************************************************************************
@@ -304,6 +364,15 @@ func (s *SQLiteStore) AddExpense(walletID int64, e app.Expense) error {
 	return err
 }
 
+// MarkExpensePaid marks a pending wallet expense as paid exactly once.
+func (s *SQLiteStore) MarkExpensePaid(walletID, expenseID int64) error {
+	_, err := s.db.Exec(
+		`UPDATE expenses SET is_paid = 1 WHERE id = ? AND wallet_id = ? AND is_paid = 0`,
+		expenseID, walletID,
+	)
+	return err
+}
+
 /* DeleteExpense - removes an expense from a wallet. */
 func (s *SQLiteStore) DeleteExpense(walletID, expenseID int64) error {
 	_, err := s.db.Exec(
@@ -340,6 +409,27 @@ func (s *SQLiteStore) peopleOf(walletID int64) ([]app.Person, error) {
 	}
 
 	return people, rows.Err()
+}
+
+func (s *SQLiteStore) periodsOf(walletID int64) ([]app.Period, error) {
+	rows, err := s.db.Query(
+		`SELECT month FROM budget_months WHERE wallet_id = ? ORDER BY month DESC`,
+		walletID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var periods []app.Period
+	for rows.Next() {
+		var period app.Period
+		if err := rows.Scan(&period.Key); err != nil {
+			return nil, err
+		}
+		periods = append(periods, period)
+	}
+	return periods, rows.Err()
 }
 
 func (s *SQLiteStore) contributionsOf(walletID int64) ([]app.Contribution, error) {
