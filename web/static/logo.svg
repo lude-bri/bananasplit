@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <title>BananaSplit logo</title>
+  <circle fill="#15803D" cx="120" cy="34" r="24"/>
+  <path stroke="#FBBF24" d="M32 92 Q120 152 208 92" fill="none" stroke-width="36" stroke-linecap="round"/>
+  <circle fill="#22C55E" cx="120" cy="206" r="24"/>
+</svg>
